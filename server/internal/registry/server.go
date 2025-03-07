@@ -256,9 +256,23 @@ func (s *Local) handlePull(w http.ResponseWriter, r *http.Request) error {
 
 			// TODO(bmizerany): coalesce these updates; writing per
 			// update is expensive
+			if errors.Is(err, ollama.ErrCached) {
+				enc.Encode(progressUpdateJSON{
+					Digest:    l.Digest,
+					Status:    "(cached)",
+					Total:     l.Size,
+					Completed: n,
+				})
+				return
+			}
+			if err != nil {
+				sum := l.Digest.Sum()
+				status := fmt.Sprintf("pulling %012x... ! error: %v", sum[:6], err)
+				enc.Encode(progressUpdateJSON{Status: status})
+				return
+			}
 			enc.Encode(progressUpdateJSON{
 				Digest:    l.Digest,
-				Status:    "pulling",
 				Total:     l.Size,
 				Completed: n,
 			})
