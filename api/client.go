@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"runtime"
@@ -28,13 +29,16 @@ import (
 	"github.com/ollama/ollama/envconfig"
 	"github.com/ollama/ollama/format"
 	"github.com/ollama/ollama/version"
+	"github.com/spf13/cobra"
+	"github.com/tjfoc/gmsm/gmtls"
 )
 
 // Client encapsulates client state for interacting with the ollama
 // service. Use [ClientFromEnvironment] to create new Clients.
 type Client struct {
-	base *url.URL
-	http *http.Client
+	base   *url.URL
+	http   *http.Client
+	apikey string
 }
 
 func checkError(resp *http.Response, body []byte) error {
@@ -62,10 +66,42 @@ func checkError(resp *http.Response, body []byte) error {
 //
 // If the variable is not specified, a default ollama host and port will be
 // used.
-func ClientFromEnvironment() (*Client, error) {
+func ClientFromEnvironment(cmd *cobra.Command) (*Client, error) {
+	if cmd == nil {
+		return &Client{
+			base: envconfig.Host(),
+			http: http.DefaultClient,
+		}, nil
+	}
+	// parse security configuration parameters.
+	insecure, _ := cmd.Flags().GetBool("insecure")
+	apikey, _ := cmd.Flags().GetString("apikey")
+	gmflag, _ := cmd.Flags().GetBool("gmtls")
+
+	config := &gmtls.Config{}
+	if insecure {
+		config.InsecureSkipVerify = true
+	}
+	// check GM flag
+	if gmflag {
+		config.GMSupport = gmtls.NewGMSupport()
+	}
+
+	// create custom gmtls Transport
+	transport := &http.Transport{
+		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return gmtls.Dial(network, addr, config)
+		},
+	}
+
+	gmClient := &http.Client{
+		Transport: transport,
+	}
+
 	return &Client{
-		base: envconfig.Host(),
-		http: http.DefaultClient,
+		base:   envconfig.Host(),
+		http:   gmClient,
+		apikey: apikey,
 	}, nil
 }
 
@@ -105,6 +141,10 @@ func (c *Client) do(ctx context.Context, method, path string, reqData, respData 
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("User-Agent", fmt.Sprintf("ollama/%s (%s %s) Go/%s", version.Version, runtime.GOARCH, runtime.GOOS, runtime.Version()))
+
+	if c.apikey != "" {
+		request.Header.Set("Authorization", "Bearer "+c.apikey)
+	}
 
 	respObj, err := c.http.Do(request)
 	if err != nil {
@@ -151,6 +191,9 @@ func (c *Client) stream(ctx context.Context, method, path string, data any, fn f
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/x-ndjson")
 	request.Header.Set("User-Agent", fmt.Sprintf("ollama/%s (%s %s) Go/%s", version.Version, runtime.GOARCH, runtime.GOOS, runtime.Version()))
+	if c.apikey != "" {
+		request.Header.Set("Authorization", "Bearer "+c.apikey)
+	}
 
 	response, err := c.http.Do(request)
 	if err != nil {

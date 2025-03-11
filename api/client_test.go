@@ -39,7 +39,7 @@ func TestClientFromEnvironment(t *testing.T) {
 		t.Run(k, func(t *testing.T) {
 			t.Setenv("OLLAMA_HOST", v.value)
 
-			client, err := ClientFromEnvironment()
+			client, err := ClientFromEnvironment(nil)
 			if err != v.err {
 				t.Fatalf("expected %s, got %s", v.err, err)
 			}

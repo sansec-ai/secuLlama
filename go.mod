@@ -12,6 +12,7 @@ require (
 	github.com/stretchr/testify v1.9.0
 	github.com/x448/float16 v0.8.4
 	golang.org/x/sync v0.11.0
+	github.com/tjfoc/gmsm v1.4.1
 )
 
 require (

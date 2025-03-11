@@ -110,7 +110,7 @@ func CreateHandler(cmd *cobra.Command, args []string) error {
 		req.Quantize = quantize
 	}
 
-	client, err := api.ClientFromEnvironment()
+	client, err := api.ClientFromEnvironment(cmd)
 	if err != nil {
 		return err
 	}
@@ -233,7 +233,7 @@ func loadOrUnloadModel(cmd *cobra.Command, opts *runOptions) error {
 	spinner := progress.NewSpinner("")
 	p.Add("", spinner)
 
-	client, err := api.ClientFromEnvironment()
+	client, err := api.ClientFromEnvironment(cmd)
 	if err != nil {
 		return err
 	}
@@ -316,7 +316,7 @@ func RunHandler(cmd *cobra.Command, args []string) error {
 
 	// Fill out the rest of the options based on information about the
 	// model.
-	client, err := api.ClientFromEnvironment()
+	client, err := api.ClientFromEnvironment(cmd)
 	if err != nil {
 		return err
 	}
@@ -373,7 +373,7 @@ func RunHandler(cmd *cobra.Command, args []string) error {
 }
 
 func PushHandler(cmd *cobra.Command, args []string) error {
-	client, err := api.ClientFromEnvironment()
+	client, err := api.ClientFromEnvironment(cmd)
 	if err != nil {
 		return err
 	}
@@ -444,7 +444,7 @@ func PushHandler(cmd *cobra.Command, args []string) error {
 }
 
 func ListHandler(cmd *cobra.Command, args []string) error {
-	client, err := api.ClientFromEnvironment()
+	client, err := api.ClientFromEnvironment(cmd)
 	if err != nil {
 		return err
 	}
@@ -477,7 +477,7 @@ func ListHandler(cmd *cobra.Command, args []string) error {
 }
 
 func ListRunningHandler(cmd *cobra.Command, args []string) error {
-	client, err := api.ClientFromEnvironment()
+	client, err := api.ClientFromEnvironment(cmd)
 	if err != nil {
 		return err
 	}
@@ -531,7 +531,7 @@ func ListRunningHandler(cmd *cobra.Command, args []string) error {
 }
 
 func DeleteHandler(cmd *cobra.Command, args []string) error {
-	client, err := api.ClientFromEnvironment()
+	client, err := api.ClientFromEnvironment(cmd)
 	if err != nil {
 		return err
 	}
@@ -542,7 +542,8 @@ func DeleteHandler(cmd *cobra.Command, args []string) error {
 		KeepAlive: &api.Duration{Duration: 0},
 	}
 	if err := loadOrUnloadModel(cmd, opts); err != nil {
-		if !strings.Contains(err.Error(), "not found") {
+		if !strings.Contains(err.Error(), "not found") &&
+			!strings.Contains(err.Error(), "HMAC") {
 			return fmt.Errorf("unable to stop existing running model \"%s\": %s", args[0], err)
 		}
 	}
@@ -558,7 +559,7 @@ func DeleteHandler(cmd *cobra.Command, args []string) error {
 }
 
 func ShowHandler(cmd *cobra.Command, args []string) error {
-	client, err := api.ClientFromEnvironment()
+	client, err := api.ClientFromEnvironment(cmd)
 	if err != nil {
 		return err
 	}
@@ -716,7 +717,7 @@ func showInfo(resp *api.ShowResponse, w io.Writer) error {
 }
 
 func CopyHandler(cmd *cobra.Command, args []string) error {
-	client, err := api.ClientFromEnvironment()
+	client, err := api.ClientFromEnvironment(cmd)
 	if err != nil {
 		return err
 	}
@@ -735,7 +736,7 @@ func PullHandler(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	client, err := api.ClientFromEnvironment()
+	client, err := api.ClientFromEnvironment(cmd)
 	if err != nil {
 		return err
 	}
@@ -853,7 +854,7 @@ func displayResponse(content string, wordWrap bool, state *displayResponseState)
 }
 
 func chat(cmd *cobra.Command, opts runOptions) (*api.Message, error) {
-	client, err := api.ClientFromEnvironment()
+	client, err := api.ClientFromEnvironment(cmd)
 	if err != nil {
 		return nil, err
 	}
@@ -934,7 +935,7 @@ func chat(cmd *cobra.Command, opts runOptions) (*api.Message, error) {
 }
 
 func generate(cmd *cobra.Command, opts runOptions) error {
-	client, err := api.ClientFromEnvironment()
+	client, err := api.ClientFromEnvironment(cmd)
 	if err != nil {
 		return err
 	}
@@ -1094,7 +1095,7 @@ func initializeKeypair() error {
 }
 
 func checkServerHeartbeat(cmd *cobra.Command, _ []string) error {
-	client, err := api.ClientFromEnvironment()
+	client, err := api.ClientFromEnvironment(cmd)
 	if err != nil {
 		return err
 	}
@@ -1110,7 +1111,7 @@ func checkServerHeartbeat(cmd *cobra.Command, _ []string) error {
 }
 
 func versionHandler(cmd *cobra.Command, _ []string) {
-	client, err := api.ClientFromEnvironment()
+	client, err := api.ClientFromEnvironment(cmd)
 	if err != nil {
 		return
 	}
@@ -1171,6 +1172,11 @@ func NewCLI() *cobra.Command {
 	}
 
 	rootCmd.Flags().BoolP("version", "v", false, "Show version information")
+
+	// command line security parameters
+	rootCmd.PersistentFlags().Bool("insecure", false, "Skip TLS certificate validation")
+	rootCmd.PersistentFlags().String("apikey", "", "API key for authentication")
+	rootCmd.PersistentFlags().Bool("gmtls", false, "Enable GMSSL/TLCP support")
 
 	createCmd := &cobra.Command{
 		Use:     "create MODEL",

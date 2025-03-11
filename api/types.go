@@ -143,6 +143,24 @@ func (m *Message) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+type Signature struct {
+	SM3       string `json:"sm3"`
+	Value     string `json:"value"`
+	Time      string `json:"timestamp"`
+	Signatory string `json:"signatory"`
+}
+
+func (m *Signature) UnmarshalJSON(b []byte) error {
+	type Alias Signature
+	var a Alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+
+	*m = Signature(a)
+	return nil
+}
+
 type ToolCall struct {
 	Function ToolCallFunction `json:"function"`
 }
@@ -193,8 +211,29 @@ type ChatResponse struct {
 	DoneReason string    `json:"done_reason,omitempty"`
 
 	Done bool `json:"done"`
+	// 签名信息
+	Signature Signature `json:"signature"`
 
 	Metrics
+}
+
+func (r *ChatResponse) MarshalJSON() ([]byte, error) {
+	// slog.Info("ChatResponse MarshalJSON called")
+	type Alias ChatResponse
+	if r.Signature == (Signature{}) {
+		return json.Marshal(&struct {
+			Signature *Signature `json:"signature,omitempty"`
+			*Alias
+		}{
+			Signature: nil,
+			Alias:     (*Alias)(r),
+		})
+	}
+	return json.Marshal(&struct {
+		*Alias
+	}{
+		Alias: (*Alias)(r),
+	})
 }
 
 type Metrics struct {

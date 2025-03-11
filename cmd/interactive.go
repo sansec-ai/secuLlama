@@ -205,7 +205,7 @@ func generateInteractive(cmd *cobra.Command, opts runOptions) error {
 				continue
 			}
 
-			client, err := api.ClientFromEnvironment()
+			client, err := api.ClientFromEnvironment(cmd)
 			if err != nil {
 				fmt.Println("error: couldn't connect to ollama server")
 				return err
@@ -325,7 +325,7 @@ func generateInteractive(cmd *cobra.Command, opts runOptions) error {
 		case strings.HasPrefix(line, "/show"):
 			args := strings.Fields(line)
 			if len(args) > 1 {
-				client, err := api.ClientFromEnvironment()
+				client, err := api.ClientFromEnvironment(cmd)
 				if err != nil {
 					fmt.Println("error: couldn't connect to ollama server")
 					return err

@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	client, err := api.ClientFromEnvironment()
+	client, err := api.ClientFromEnvironment(nil)
 	if err != nil {
 		log.Fatal(err)
 	}

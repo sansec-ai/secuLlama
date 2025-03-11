@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -25,6 +26,9 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/tjfoc/gmsm/gmtls"
+	"github.com/tjfoc/gmsm/sm2"
+	"github.com/tjfoc/gmsm/sm3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ollama/ollama/api"
@@ -34,6 +38,7 @@ import (
 	"github.com/ollama/ollama/llm"
 	"github.com/ollama/ollama/model/models/mllama"
 	"github.com/ollama/ollama/openai"
+	"github.com/ollama/ollama/security"
 	"github.com/ollama/ollama/server/internal/client/ollama"
 	"github.com/ollama/ollama/server/internal/registry"
 	"github.com/ollama/ollama/template"
@@ -45,8 +50,12 @@ import (
 var mode string = gin.DebugMode
 
 type Server struct {
-	addr  net.Addr
-	sched *Scheduler
+	addr      net.Addr
+	sched     *Scheduler
+	certFile  string
+	certKey   string
+	sm2Key    *sm2.PrivateKey
+	signatory string
 }
 
 func init() {
@@ -301,7 +310,7 @@ func (s *Server) GenerateHandler(c *gin.Context) {
 			Format:  req.Format,
 			Options: opts,
 		}, func(cr llm.CompletionResponse) {
-			res := api.GenerateResponse{
+			res := &api.GenerateResponse{
 				Model:      req.Model,
 				CreatedAt:  time.Now().UTC(),
 				Response:   cr.Content,
@@ -722,6 +731,20 @@ func (s *Server) DeleteHandler(c *gin.Context) {
 		return
 	}
 
+	manifestPath := m.filepath
+	// hmac file is the manifest file name with .hmac appended
+	hmacPath := manifestPath + ".hmac"
+
+	// Check if the hmac file exists
+	if _, err := os.Stat(hmacPath); err == nil {
+		// If the hmac file exists, delete it
+		if err := os.Remove(hmacPath); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to delete hmac file: %v", err)})
+			return
+		}
+		fmt.Printf("Deleted hmac file: %s\n", hmacPath)
+	}
+
 	if err := m.Remove(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -1129,6 +1152,10 @@ func allowedHostsMiddleware(addr net.Addr) gin.HandlerFunc {
 }
 
 func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
+	// Initialize security protection middleware
+	validKeys := security.GetAPIKeys() // Get all API keys
+	authMiddleware := security.APIKeyAuth(validKeys)
+
 	corsConfig := cors.DefaultConfig()
 	corsConfig.AllowWildcard = true
 	corsConfig.AllowBrowserExtensions = true
@@ -1167,33 +1194,48 @@ func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
 	r.HEAD("/api/version", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"version": version.Version}) })
 	r.GET("/api/version", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"version": version.Version}) })
 
-	// Local model cache management (new implementation is at end of function)
-	r.POST("/api/pull", s.PullHandler)
-	r.POST("/api/push", s.PushHandler)
-	r.HEAD("/api/tags", s.ListHandler)
-	r.GET("/api/tags", s.ListHandler)
-	r.POST("/api/show", s.ShowHandler)
+	// API routes that require security protection
+	secure := r.Group("/")
+	secure.Use(authMiddleware)
+	{
+		// Local model cache management (new implementation is at end of function)
+		secure.POST("/api/pull", s.PullHandler)
+		secure.POST("/api/push", s.PushHandler)
+		secure.HEAD("/api/tags", s.ListHandler)
+		secure.GET("/api/tags", s.ListHandler)
+		secure.POST("/api/show", s.ShowHandler)
 
-	// Create
-	r.POST("/api/create", s.CreateHandler)
-	r.POST("/api/blobs/:digest", s.CreateBlobHandler)
-	r.HEAD("/api/blobs/:digest", s.HeadBlobHandler)
-	r.POST("/api/copy", s.CopyHandler)
+		// Create
+		secure.POST("/api/create", s.CreateHandler)
+		secure.POST("/api/blobs/:digest", s.CreateBlobHandler)
+		secure.HEAD("/api/blobs/:digest", s.HeadBlobHandler)
+		secure.POST("/api/copy", s.CopyHandler)
 
-	// Inference
-	r.GET("/api/ps", s.PsHandler)
-	r.POST("/api/generate", s.GenerateHandler)
-	r.POST("/api/chat", s.ChatHandler)
-	r.POST("/api/embed", s.EmbedHandler)
-	r.POST("/api/embeddings", s.EmbeddingsHandler)
+		// Inference
+		secure.GET("/api/ps", s.PsHandler)
+		secure.POST("/api/generate", s.GenerateHandler)
+		secure.POST("/api/chat", s.ChatHandler)
+		secure.POST("/api/embed", s.EmbedHandler)
+		secure.POST("/api/embeddings", s.EmbeddingsHandler)
 
-	// Inference (OpenAI compatibility)
-	r.POST("/v1/chat/completions", openai.ChatMiddleware(), s.ChatHandler)
-	r.POST("/v1/completions", openai.CompletionsMiddleware(), s.GenerateHandler)
-	r.POST("/v1/embeddings", openai.EmbeddingsMiddleware(), s.EmbedHandler)
-	r.GET("/v1/models", openai.ListMiddleware(), s.ListHandler)
-	r.GET("/v1/models/:model", openai.RetrieveMiddleware(), s.ShowHandler)
+		// Inference (OpenAI compatibility)
+		secure.POST("/v1/chat/completions", openai.ChatMiddleware(), s.ChatHandler)
+		secure.POST("/v1/completions", openai.CompletionsMiddleware(), s.GenerateHandler)
+		secure.POST("/v1/embeddings", openai.EmbeddingsMiddleware(), s.EmbedHandler)
+		secure.GET("/v1/models", openai.ListMiddleware(), s.ListHandler)
+		secure.GET("/v1/models/:model", openai.RetrieveMiddleware(), s.ShowHandler)
 
+		// Add API key management endpoint
+		secure.POST("/v1/auth/generate-key", func(c *gin.Context) {
+			key, err := security.GenerateAPIKey()
+			if err != nil {
+				c.JSON(http.StatusInternalServerError,
+					gin.H{"error": "failed to generate API key"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"api_key": key})
+		})
+	}
 	// wrap old with new
 	rs := &registry.Local{
 		Client:   rc,
@@ -1267,6 +1309,45 @@ func Serve(ln net.Listener) error {
 	if err != nil {
 		return err
 	}
+
+	// Load security configuration
+	s.certFile, s.certKey, s.sm2Key, err = security.LoadSecurityConfig()
+	if err != nil {
+		return err
+	}
+	s.signatory = envconfig.SM2Signatory()
+
+	var config *gmtls.Config
+	isGmSSL := false
+	if s.certFile != "" {
+		signCert, err := gmtls.LoadX509KeyPair(s.certFile, s.certKey)
+		if err != nil {
+			slog.Error("Failed to load certificate and key ", "error", err)
+			return nil
+		}
+		isGmSSL = security.IsGMSSLCertFile(s.certFile)
+		if isGmSSL {
+			// Enable dual certificates for GMSSL
+			encCert, err := gmtls.LoadX509KeyPair(envconfig.SSLCertEnc(), envconfig.SSLKeyEnc())
+			if err != nil {
+				slog.Error("Failed to load enc certificate and key ", "error", err)
+				return err
+			}
+
+			config = &gmtls.Config{
+				GMSupport: &gmtls.GMSupport{
+					WorkMode: "GMSSLOnly", // "AutoSwitch",
+				},
+				Certificates: []gmtls.Certificate{signCert, encCert}, // Initialize certificate list
+				// CipherSuites:  // Use default GMSSL cipher suites
+			}
+		} else if s.certFile != "" {
+			config = &gmtls.Config{
+				Certificates: []gmtls.Certificate{signCert},
+			}
+		}
+	}
+
 	http.Handle("/", h)
 
 	ctx, done := context.WithCancel(context.Background())
@@ -1285,6 +1366,9 @@ func Serve(ln net.Listener) error {
 		// and easy way to get pprof, but it may not be the best
 		// way.
 		Handler: nil,
+		TLSConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		},
 	}
 
 	// listen for a ctrl+c and stop any loaded llm
@@ -1305,7 +1389,17 @@ func Serve(ln net.Listener) error {
 	gpus := discover.GetGPUInfo()
 	gpus.LogDetails()
 
-	err = srvr.Serve(ln)
+	// err = srvr.Serve(ln)
+
+	if s.certFile != "" && s.certKey != "" {
+		slog.Info("Starting SSL server.", "isGmSSL", isGmSSL)
+		gmListener := gmtls.NewListener(ln, config)
+		err = srvr.Serve(gmListener)
+	} else {
+		slog.Info("Starting non-SSL server.")
+		err = srvr.Serve(ln)
+	}
+
 	// If server is closed from the signal handler, wait for the ctx to be done
 	// otherwise error out quickly
 	if !errors.Is(err, http.ErrServerClosed) {
@@ -1438,7 +1532,7 @@ func (s *Server) ChatHandler(c *gin.Context) {
 		}
 		s.sched.expireRunner(model)
 
-		c.JSON(http.StatusOK, api.ChatResponse{
+		c.JSON(http.StatusOK, &api.ChatResponse{
 			Model:      req.Model,
 			CreatedAt:  time.Now().UTC(),
 			Message:    api.Message{Role: "assistant"},
@@ -1476,7 +1570,7 @@ func (s *Server) ChatHandler(c *gin.Context) {
 	checkpointLoaded := time.Now()
 
 	if len(req.Messages) == 0 {
-		c.JSON(http.StatusOK, api.ChatResponse{
+		c.JSON(http.StatusOK, &api.ChatResponse{
 			Model:      req.Model,
 			CreatedAt:  time.Now().UTC(),
 			Message:    api.Message{Role: "assistant"},
@@ -1505,13 +1599,16 @@ func (s *Server) ChatHandler(c *gin.Context) {
 		defer close(ch)
 		var sb strings.Builder
 		var toolCallIndex int = 0
+		var sm3Inst = sm3.New()     // initialize the SM3 hash instance.
+		var contentBuf bytes.Buffer // used to accumulate complete content.
+
 		if err := r.Completion(c.Request.Context(), llm.CompletionRequest{
 			Prompt:  prompt,
 			Images:  images,
 			Format:  req.Format,
 			Options: opts,
 		}, func(r llm.CompletionResponse) {
-			res := api.ChatResponse{
+			res := &api.ChatResponse{
 				Model:      req.Model,
 				CreatedAt:  time.Now().UTC(),
 				Message:    api.Message{Role: "assistant", Content: r.Content},
@@ -1525,9 +1622,21 @@ func (s *Server) ChatHandler(c *gin.Context) {
 				},
 			}
 
+			if s.sm2Key != nil {
+				// update hash and buffer.
+				sm3Inst.Write([]byte(r.Content))
+				contentBuf.Write([]byte(r.Content))
+			}
+
 			if r.Done {
 				res.TotalDuration = time.Since(checkpointStart)
 				res.LoadDuration = checkpointLoaded.Sub(checkpointStart)
+
+				if s.sm2Key != nil {
+					// Final block hash calculation and signature
+					sm3Sum := sm3Inst.Sum(nil)
+					err = security.SignResponse(s.sm2Key, sm3Sum, s.signatory, res)
+				}
 			}
 
 			// TODO: tool call checking and filtering should be moved outside of this callback once streaming
@@ -1567,11 +1676,11 @@ func (s *Server) ChatHandler(c *gin.Context) {
 	}()
 
 	if req.Stream != nil && !*req.Stream {
-		var resp api.ChatResponse
+		var resp *api.ChatResponse
 		var sb strings.Builder
 		for rr := range ch {
 			switch t := rr.(type) {
-			case api.ChatResponse:
+			case *api.ChatResponse:
 				sb.WriteString(t.Message.Content)
 				resp = t
 			case gin.H:
@@ -1594,6 +1703,17 @@ func (s *Server) ChatHandler(c *gin.Context) {
 			if toolCalls, ok := m.parseToolCalls(sb.String()); ok {
 				resp.Message.ToolCalls = toolCalls
 				resp.Message.Content = ""
+			}
+		}
+
+		if resp.Message.Content != "" && len(resp.Message.ToolCalls) == 0 {
+			if s.sm2Key != nil {
+				// add the calculated signature value to the response.
+				h := sm3.New()
+				h.Write([]byte(resp.Message.Content))
+				sm3Sum := h.Sum(nil)
+
+				err = security.SignResponse(s.sm2Key, sm3Sum, s.signatory, resp)
 			}
 		}
 

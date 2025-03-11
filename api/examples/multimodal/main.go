@@ -19,7 +19,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	client, err := api.ClientFromEnvironment()
+	client, err := api.ClientFromEnvironment(nil)
 	if err != nil {
 		log.Fatal(err)
 	}

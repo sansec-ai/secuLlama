@@ -98,13 +98,14 @@ type ChatCompletionRequest struct {
 }
 
 type ChatCompletion struct {
-	Id                string   `json:"id"`
-	Object            string   `json:"object"`
-	Created           int64    `json:"created"`
-	Model             string   `json:"model"`
-	SystemFingerprint string   `json:"system_fingerprint"`
-	Choices           []Choice `json:"choices"`
-	Usage             Usage    `json:"usage,omitempty"`
+	Id                string        `json:"id"`
+	Object            string        `json:"object"`
+	Created           int64         `json:"created"`
+	Model             string        `json:"model"`
+	SystemFingerprint string        `json:"system_fingerprint"`
+	Choices           []Choice      `json:"choices"`
+	Usage             Usage         `json:"usage,omitempty"`
+	Signature         api.Signature `json:"signature,omitempty"`
 }
 
 type ChatCompletionChunk struct {
@@ -115,6 +116,7 @@ type ChatCompletionChunk struct {
 	SystemFingerprint string        `json:"system_fingerprint"`
 	Choices           []ChunkChoice `json:"choices"`
 	Usage             *Usage        `json:"usage,omitempty"`
+	Signature         api.Signature `json:"signature"`
 }
 
 // TODO (https://github.com/ollama/ollama/issues/5259): support []string, []int and [][]int
@@ -245,7 +247,7 @@ func toToolCalls(tc []api.ToolCall) []ToolCall {
 
 func toChatCompletion(id string, r api.ChatResponse) ChatCompletion {
 	toolCalls := toToolCalls(r.Message.ToolCalls)
-	return ChatCompletion{
+	chatCompletion := ChatCompletion{
 		Id:                id,
 		Object:            "chat.completion",
 		Created:           r.CreatedAt.Unix(),
@@ -266,11 +268,15 @@ func toChatCompletion(id string, r api.ChatResponse) ChatCompletion {
 		}},
 		Usage: toUsage(r),
 	}
+	if r.Signature != (api.Signature{}) {
+		chatCompletion.Signature = r.Signature
+	}
+	return chatCompletion
 }
 
 func toChunk(id string, r api.ChatResponse, toolCallSent bool) ChatCompletionChunk {
 	toolCalls := toToolCalls(r.Message.ToolCalls)
-	return ChatCompletionChunk{
+	completionChunk := ChatCompletionChunk{
 		Id:                id,
 		Object:            "chat.completion.chunk",
 		Created:           time.Now().Unix(),
@@ -290,6 +296,28 @@ func toChunk(id string, r api.ChatResponse, toolCallSent bool) ChatCompletionChu
 			}(r.DoneReason),
 		}},
 	}
+	if r.Signature != (api.Signature{}) {
+		completionChunk.Signature = r.Signature
+	}
+	return completionChunk
+}
+
+func (r ChatCompletionChunk) MarshalJSON() ([]byte, error) {
+	type Alias ChatCompletionChunk
+	if r.Signature == (api.Signature{}) {
+		return json.Marshal(&struct {
+			Signature *api.Signature `json:"signature,omitempty"`
+			*Alias
+		}{
+			Signature: nil,
+			Alias:     (*Alias)(&r),
+		})
+	}
+	return json.Marshal(&struct {
+		*Alias
+	}{
+		Alias: (*Alias)(&r),
+	})
 }
 
 func toUsageGenerate(r api.GenerateResponse) Usage {

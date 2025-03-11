@@ -53,6 +53,35 @@ func Host() *url.URL {
 	}
 }
 
+// security related environment variables
+func SSLCert() string {
+	return Var("OLLAMA_SSL_CERT")
+}
+
+func SSLKey() string {
+	return Var("OLLAMA_SSL_KEY")
+}
+func SSLCertEnc() string {
+	return Var("OLLAMA_SSL_CERT_ENC")
+}
+func SSLKeyEnc() string {
+	return Var("OLLAMA_SSL_KEY_ENC")
+}
+
+// SM2Key returns the path to SM2 private key
+func SM2Key() string {
+	return Var("OLLAMA_SM2_KEY")
+}
+
+// SM2 signatory information
+func SM2Signatory() string {
+	return Var("OLLAMA_SM2_SIGNATORY")
+}
+
+func HMACKey() string {
+	return Var("OLLAMA_HMAC_KEY")
+}
+
 // AllowedOrigins returns a list of allowed origins. AllowedOrigins can be configured via the OLLAMA_ORIGINS environment variable.
 func AllowedOrigins() (origins []string) {
 	if s := Var("OLLAMA_ORIGINS"); s != "" {
@@ -262,6 +291,14 @@ func AsMap() map[string]EnvVar {
 		"HTTP_PROXY":  {"HTTP_PROXY", String("HTTP_PROXY")(), "HTTP proxy"},
 		"HTTPS_PROXY": {"HTTPS_PROXY", String("HTTPS_PROXY")(), "HTTPS proxy"},
 		"NO_PROXY":    {"NO_PROXY", String("NO_PROXY")(), "No proxy"},
+
+		// Security Config
+		"OLLAMA_SSL_CERT":     {"OLLAMA_SSL_CERT", SSLCert(), "Path to SSL certificate file"},
+		"OLLAMA_SSL_KEY":      {"OLLAMA_SSL_KEY", SSLKey(), "Path to SSL private key file"},
+		"OLLAMA_SSL_CERT_ENC": {"OLLAMA_SSL_CERT_ENC", SSLCert(), "Path to GM SSL Encryption Certificate file"},
+		"OLLAMA_SSL_KEY_ENC":  {"OLLAMA_SSL_KEY_ENC", SSLKey(), "Path to  GM SSL Encryption private key file"},
+		"OLLAMA_SM2_KEY":      {"OLLAMA_SM2_KEY", SM2Key(), "Path to SM2 private key file (PEM format)"},
+		"OLLAMA_HMAC_KEY":     {"OLLAMA_HMAC_KEY", HMACKey(), "Path to hmac key."},
 	}
 
 	if runtime.GOOS != "windows" {

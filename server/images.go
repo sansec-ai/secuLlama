@@ -25,6 +25,7 @@ import (
 	"github.com/ollama/ollama/envconfig"
 	"github.com/ollama/ollama/fs/ggml"
 	"github.com/ollama/ollama/parser"
+	"github.com/ollama/ollama/security"
 	"github.com/ollama/ollama/template"
 	"github.com/ollama/ollama/types/model"
 	"github.com/ollama/ollama/version"
@@ -256,6 +257,56 @@ func GetModel(name string) (*Model, error) {
 		if err := json.NewDecoder(configFile).Decode(&model.Config); err != nil {
 			return nil, err
 		}
+		hmacMap := make(map[string]string)
+		tempManifestPath, err := mp.GetManifestPath()
+		if err != nil {
+			return nil, err
+		}
+		// Get HMAC data
+		if _, err := os.Stat(tempManifestPath + ".hmac"); err == nil {
+			// Read the original key:value pairs from the file as a map
+			hmacData, err := os.ReadFile(tempManifestPath + ".hmac")
+			if err != nil {
+				return nil, err
+			}
+			for _, line := range strings.Split(string(hmacData), "\n") {
+				if strings.TrimSpace(line) == "" {
+					continue
+				}
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) != 2 {
+					return nil, fmt.Errorf("invalid .hmac file format: expected key:value, got '%s'", line)
+				}
+				hmacMap[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+			}
+		}
+		if len(hmacMap) != 0 {
+
+			hmacKey, ok := security.GetHmacKey()
+			if !ok {
+				slog.Warn("OLLAMA_HMAC_KEY environment variable is not set")
+			}
+
+			hmacDataName := filepath.Base(filename)
+			// Read the m.ModelPath corresponding file and calculate HMAC
+			hmacRes, err := security.SM3HmacFile([]byte(hmacKey), filename)
+			if err != nil {
+				return nil, err
+			}
+			hmacMapValue, ok := hmacMap[hmacDataName]
+			if !ok {
+				return nil, fmt.Errorf("HMAC data not found for %s", filename)
+			} else {
+				hmacValueHex, err := hex.DecodeString(hmacMapValue)
+				if err != nil {
+					return nil, fmt.Errorf("the Model's HMAC data error: %s", err)
+				}
+				if !bytes.Equal(hmacValueHex, hmacRes) {
+					return nil, fmt.Errorf("the Model's HMAC verification failed")
+				}
+			}
+		}
+
 	}
 
 	for _, layer := range manifest.Layers {
@@ -525,7 +576,12 @@ func PushModel(ctx context.Context, name string, regOpts *registryOptions, fn fu
 
 func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn func(api.ProgressResponse)) error {
 	mp := ParseModelPath(name)
+	mp.GetNamespaceRepository()
 
+	hmacKey, ok := security.GetHmacKey()
+	if !ok {
+		slog.Warn("OLLAMA_HMAC_KEY environment variable is not set")
+	}
 	// build deleteMap to prune unused layers
 	deleteMap := make(map[string]struct{})
 	manifest, _, err := GetManifest(mp)
@@ -609,6 +665,39 @@ func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn fu
 	}
 	if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
 		return err
+	}
+	// Create HMAC file path
+	var hmacFilePathBuilder strings.Builder
+	hmacFilePathBuilder.WriteString(fp)
+	hmacFilePathBuilder.WriteString(".hmac")
+	hmacFilePath := hmacFilePathBuilder.String()
+	// Open HMAC file for writing
+	hmacFile, err := os.OpenFile(hmacFilePath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("failed to create HMAC file: %v", err)
+	}
+	defer hmacFile.Close()
+
+	// Iterate through all layer files and calculate HMAC-SM3
+	for _, layer := range layers {
+		// Get the path of the layer file
+		fp, err := GetBlobsPath(layer.Digest)
+		if err != nil {
+			return err
+		}
+
+		// Calculate HMAC-SM3
+		hmacResult, err := security.SM3HmacFile([]byte(hmacKey), fp)
+		if err != nil {
+			return err
+		}
+
+		newDigest := strings.Replace(layer.Digest, ":", "-", 1)
+		// Write HMAC-SM3 result to HMAC file
+		_, err = fmt.Fprintf(hmacFile, "%s:%s\n", newDigest, hex.EncodeToString(hmacResult))
+		if err != nil {
+			return err
+		}
 	}
 
 	err = os.WriteFile(fp, manifestJSON, 0o644)

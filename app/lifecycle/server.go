@@ -171,7 +171,7 @@ func SpawnServer(ctx context.Context, command string) (chan int, error) {
 }
 
 func IsServerRunning(ctx context.Context) bool {
-	client, err := api.ClientFromEnvironment()
+	client, err := api.ClientFromEnvironment(nil)
 	if err != nil {
 		slog.Info("unable to connect to server")
 		return false
