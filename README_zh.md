@@ -3,7 +3,7 @@
 本项目基于开源 [Ollama](https://github.com/ollama/ollama) ，增加安全配置参数，对大模型运行系统进行安全保护，主要特性如下:
 ### 1. SSL/TLS 传输安全保护
 - 支持国密标准 **GM/T 0024-2014** 双证书 (签名证书和加密证书)
-- 环境变量配置如下:
+- 服务启动时配置环境变量如下:
 ```bash
   # 服务端SSL/TLS 证书文件的路径
   OLLAMA_SSL_CERT=path/to/sig_cert.pem
@@ -14,10 +14,11 @@
 ```
 ### 2. API Key 安全保护
 - 默认启用API安全防护，并在第一次启动时生成一个随机的key，写入`~/.ollama/api_keys`文件。
+- 每次对secuLlama的API调用，都会使用apiKey进行校验。
 
 ### 3. 大模型系统响应消息的签名
-- 对大模型对话API输出的内容进行sm3计算和签名，防止模型文件被篡改。
-- 需配置如下环境变量:
+- 对大模型对话API输出的内容进行sm3计算和sm2签名，防止大模型的输出被非法篡改。
+- 服务启动时需配置如下环境变量:
 ```bash
 # sm2 key文件(PKCS8格式)
 OLLAMA_SM2_KEY=path/to/sm2_private.pem
@@ -52,21 +53,29 @@ OLLAMA_SM2_SIGNATORY="Your Organization Name"
 
 ### 4.大模型文件的一致性校验
 - 模型文件在拉取到本地后进行hmac计算 ，并在模型文件运行加载时进行hmac验证，防止模型文件被篡改。
-- 需要配置HMAC key文件路径:
+- 服务启动时需要配置HMAC key文件路径:
 ```
 OLLAMA_HMAC_KEY=path/to/hmac_key.bin
 ```
-### 5. 硬件安全模块的支持
-- 本项目支持使用密码卡等硬件模块，提供安全密钥的保护能力 ，可对api key、hmac key、sm2 key及证书文件进行加密。
-- 环境变量配置如下:
-```
-OLLAMA_HSM_MODULE=path/to/hsm_library.so
-OLLAMA_HSM_PIN=123456
+### 5. 硬件安全模块(HSM)的支持
+- 本项目支持使用密码卡等硬件模块，提供安全密钥的保护能力 ，可对api key文件及证书文件进行加密保护。
+- 支持标准GM 0018的密码运算接口。
+- 在启用HSM功能后，配置以下环境变量：
+```bash
+# sm2 key在密码机中的索引
+OLLAMA_SM2_KEY=1
+# hmac key原文
+OLLAMA_HMAC_KEY=123456
 ```
 
 ## 安装
 
-与Ollama一致，参考[Manual install instructions](https://github.com/ollama/ollama/blob/main/docs/linux.md).
+- 使用软件密码算法的编译与Ollama一致，参考[Manual install instructions](https://github.com/ollama/ollama/blob/main/docs/linux.md).
+- 使用硬件安全模块编译，需要将连接的密码卡(机)的库文件复制到`security`目录，并启用`hsm`标签编译，如下：
+```bash
+go build --tags=hsm .
+```
+
 
 ## 使用说明
 ### ollama命令
@@ -74,8 +83,7 @@ OLLAMA_HSM_PIN=123456
 - 在服务端启用了SSL/TLS传输后，客户端需要增加如下的配置参数：
 ```bash
 --insecure # 忽略证书校验
---tls # 使用rsa证书
---gmtls # 使用国密证书
+--gmtls # 使用国密证书 (默认使用RSA证书)
 ```
 - 示例如下:
 ```bash

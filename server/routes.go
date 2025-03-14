@@ -27,7 +27,6 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/tjfoc/gmsm/gmtls"
-	"github.com/tjfoc/gmsm/sm2"
 	"github.com/tjfoc/gmsm/sm3"
 	"golang.org/x/sync/errgroup"
 
@@ -54,7 +53,7 @@ type Server struct {
 	sched     *Scheduler
 	certFile  string
 	certKey   string
-	sm2Key    *sm2.PrivateKey
+	crypto    security.Crypto
 	signatory string
 }
 
@@ -95,7 +94,7 @@ func (s *Server) scheduleRunner(ctx context.Context, name string, caps []Capabil
 		return nil, nil, nil, fmt.Errorf("model %w", errRequired)
 	}
 
-	model, err := GetModel(name)
+	model, err := GetModel(s.crypto, name)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -147,7 +146,7 @@ func (s *Server) GenerateHandler(c *gin.Context) {
 		return
 	}
 
-	model, err := GetModel(name.String())
+	model, err := GetModel(s.crypto, name.String())
 	if err != nil {
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
@@ -777,7 +776,7 @@ func (s *Server) ShowHandler(c *gin.Context) {
 		return
 	}
 
-	resp, err := GetModelInfo(req)
+	resp, err := GetModelInfo(s.crypto, req)
 	if err != nil {
 		switch {
 		case os.IsNotExist(err):
@@ -793,7 +792,7 @@ func (s *Server) ShowHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-func GetModelInfo(req api.ShowRequest) (*api.ShowResponse, error) {
+func GetModelInfo(crypto security.Crypto, req api.ShowRequest) (*api.ShowResponse, error) {
 	name := model.ParseName(req.Model)
 	if !name.IsValid() {
 		return nil, errModelPathInvalid
@@ -803,7 +802,7 @@ func GetModelInfo(req api.ShowRequest) (*api.ShowResponse, error) {
 		return nil, err
 	}
 
-	m, err := GetModel(name.String())
+	m, err := GetModel(crypto, name.String())
 	if err != nil {
 		return nil, err
 	}
@@ -1311,7 +1310,7 @@ func Serve(ln net.Listener) error {
 	}
 
 	// Load security configuration
-	s.certFile, s.certKey, s.sm2Key, err = security.LoadSecurityConfig()
+	s.certFile, s.certKey, s.crypto, err = security.LoadSecurityConfig()
 	if err != nil {
 		return err
 	}
@@ -1518,7 +1517,7 @@ func (s *Server) ChatHandler(c *gin.Context) {
 
 	// expire the runner
 	if len(req.Messages) == 0 && req.KeepAlive != nil && int(req.KeepAlive.Seconds()) == 0 {
-		model, err := GetModel(req.Model)
+		model, err := GetModel(s.crypto, req.Model)
 		if err != nil {
 			switch {
 			case os.IsNotExist(err):
@@ -1622,7 +1621,7 @@ func (s *Server) ChatHandler(c *gin.Context) {
 				},
 			}
 
-			if s.sm2Key != nil {
+			if s.crypto != nil {
 				// update hash and buffer.
 				sm3Inst.Write([]byte(r.Content))
 				contentBuf.Write([]byte(r.Content))
@@ -1632,10 +1631,10 @@ func (s *Server) ChatHandler(c *gin.Context) {
 				res.TotalDuration = time.Since(checkpointStart)
 				res.LoadDuration = checkpointLoaded.Sub(checkpointStart)
 
-				if s.sm2Key != nil {
+				if s.crypto != nil {
 					// Final block hash calculation and signature
 					sm3Sum := sm3Inst.Sum(nil)
-					err = security.SignResponse(s.sm2Key, sm3Sum, s.signatory, res)
+					err = security.SignResponse(s.crypto, sm3Sum, s.signatory, res)
 				}
 			}
 
@@ -1707,13 +1706,13 @@ func (s *Server) ChatHandler(c *gin.Context) {
 		}
 
 		if resp.Message.Content != "" && len(resp.Message.ToolCalls) == 0 {
-			if s.sm2Key != nil {
+			if s.crypto != nil {
 				// add the calculated signature value to the response.
 				h := sm3.New()
 				h.Write([]byte(resp.Message.Content))
 				sm3Sum := h.Sum(nil)
 
-				err = security.SignResponse(s.sm2Key, sm3Sum, s.signatory, resp)
+				err = security.SignResponse(s.crypto, sm3Sum, s.signatory, resp)
 			}
 		}
 

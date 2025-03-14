@@ -228,7 +228,10 @@ func GetManifest(mp ModelPath) (*Manifest, string, error) {
 	return &manifest, hex.EncodeToString(sha256sum.Sum(nil)), nil
 }
 
-func GetModel(name string) (*Model, error) {
+func GetModel(crypto security.Crypto, name string) (*Model, error) {
+	if crypto == nil {
+		crypto, _ = security.NewCrypto()
+	}
 	mp := ParseModelPath(name)
 	manifest, digest, err := GetManifest(mp)
 	if err != nil {
@@ -281,15 +284,9 @@ func GetModel(name string) (*Model, error) {
 			}
 		}
 		if len(hmacMap) != 0 {
-
-			hmacKey, ok := security.GetHmacKey()
-			if !ok {
-				slog.Warn("OLLAMA_HMAC_KEY environment variable is not set")
-			}
-
 			hmacDataName := filepath.Base(filename)
 			// Read the m.ModelPath corresponding file and calculate HMAC
-			hmacRes, err := security.SM3HmacFile([]byte(hmacKey), filename)
+			hmacRes, err := crypto.HmacFile(filename)
 			if err != nil {
 				return nil, err
 			}
@@ -578,10 +575,11 @@ func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn fu
 	mp := ParseModelPath(name)
 	mp.GetNamespaceRepository()
 
-	hmacKey, ok := security.GetHmacKey()
-	if !ok {
-		slog.Warn("OLLAMA_HMAC_KEY environment variable is not set")
+	crypto, err := security.NewCrypto()
+	if err != nil {
+		return err
 	}
+
 	// build deleteMap to prune unused layers
 	deleteMap := make(map[string]struct{})
 	manifest, _, err := GetManifest(mp)
@@ -687,7 +685,7 @@ func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn fu
 		}
 
 		// Calculate HMAC-SM3
-		hmacResult, err := security.SM3HmacFile([]byte(hmacKey), fp)
+		hmacResult, err := crypto.HmacFile(fp)
 		if err != nil {
 			return err
 		}

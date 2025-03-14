@@ -57,15 +57,19 @@ OLLAMA_HMAC_KEY=path/to/hmac_key.bin
 ```
 ### 5. Hardware Security Module Support
 - This project supports the use of hardware modules such as cryptographic cards to provide secure key protection capabilities, encrypting API keys, HMAC keys, SM2 keys, and certificate files.
-- Environment variable configuration::
-```
-OLLAMA_HSM_MODULE=path/to/hsm_library.so
-OLLAMA_HSM_PIN=123456
+- Supports the standard GM 0018 cryptographic operation interface.
+- After enabling the HSM function, configure the following environment variables:
+```bash
+# Index of the sm2 key in the cryptographic device
+OLLAMA_SM2_KEY=1
+# The original hmac key
+OLLAMA_HMAC_KEY=123456
 ```
 
 ## Installation
 
-Consistent with Ollama, refer to[Manual install instructions](https://github.com/ollama/ollama/blob/main/docs/linux.md).
+- The compilation using software cryptographic algorithms is consistent with Ollama. Refer to Manual install instructions.
+- To compile with Hardware Security Module (HSM), you need to copy the library files of the connected HSM to the `security` directory and enable the hsm tag for compilation as follows:
 
 ## Usage Instructions
 ### ollama Command
@@ -73,8 +77,7 @@ Consistent with Ollama, refer to[Manual install instructions](https://github.com
 - After enabling SSL/TLS transmission on the server, the client needs to add the following configuration parameters:
 ```bash
 --insecure # Ignore certificate verification
---tls # Use RSA SSL certificate
---gmtls # Use GM SSL certificate
+--gmtls # Use GM SSL certificate(Default to using RSA certificate)
 ```
 - Example:
 ```bash

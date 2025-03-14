@@ -324,6 +324,20 @@ func (c *DiskCache) Unlink(name string) (ok bool, _ error) {
 	if err != nil {
 		return false, err
 	}
+
+	// hmac file is the manifest file name with .hmac appended
+	hmacPath := manifest + ".hmac"
+
+	// Check if the hmac file exists
+	if _, err := os.Stat(hmacPath); err == nil {
+		// If the hmac file exists, delete it
+		if err := os.Remove(hmacPath); err != nil {
+			fmt.Printf("failed to delete hmac file: %v", err)
+			return
+		}
+		fmt.Printf("Deleted hmac file: %s\n", hmacPath)
+	}
+
 	err = os.Remove(manifest)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil

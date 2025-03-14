@@ -152,6 +152,11 @@ func Manifests(continueOnError bool) (map[model.Name]*Manifest, error) {
 				continue
 			}
 
+			if filepath.Ext(rel) == ".hmac" {
+				slog.Info("skipping hmac file", "path", rel)
+				continue
+			}
+
 			n := model.ParseNameFromFilepath(rel)
 			if !n.IsValid() {
 				if !continueOnError {

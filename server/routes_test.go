@@ -268,7 +268,7 @@ func TestRoutes(t *testing.T) {
 				}
 
 				// Verify the model was deleted
-				_, err := GetModel("model-to-delete")
+				_, err := GetModel(nil, "model-to-delete")
 				if err == nil || !os.IsNotExist(err) {
 					t.Errorf("expected model to be deleted, got error %v", err)
 				}
@@ -367,7 +367,7 @@ func TestRoutes(t *testing.T) {
 					t.Errorf("expected status code 200, got %d", resp.StatusCode)
 				}
 
-				model, err := GetModel("t-bone")
+				model, err := GetModel(nil, "t-bone")
 				if err != nil {
 					t.Fatalf("failed to get model: %v", err)
 				}
@@ -394,7 +394,7 @@ func TestRoutes(t *testing.T) {
 				req.Body = io.NopCloser(bytes.NewReader(jsonData))
 			},
 			Expected: func(t *testing.T, resp *http.Response) {
-				model, err := GetModel("beefsteak")
+				model, err := GetModel(nil, "beefsteak")
 				if err != nil {
 					t.Fatalf("failed to get model: %v", err)
 				}
