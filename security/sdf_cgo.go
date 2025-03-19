@@ -2,6 +2,7 @@
 
 package security
 
+//
 /*
 #cgo CFLAGS: -I./
 #cgo linux LDFLAGS: -L. -lswsds -Wl,-rpath,${SRCDIR}
@@ -26,6 +27,8 @@ type CTypeSGDHandle C.SGD_HANDLE
 
 const MAX_INT int = 2147483647
 const SGD_SM3 CTypeAlgorithm = 0x00000001
+const SGD_SMS4_CBC CTypeAlgorithm = 0x00000402
+const SGD_SMS4_ECB CTypeAlgorithm = 0x00000401
 
 func ConvertInt64toError(result int64) error {
 	if result == 0 {

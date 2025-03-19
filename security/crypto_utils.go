@@ -18,6 +18,8 @@ type Crypto interface {
 	Sign(message []byte) ([]byte, error)
 	Verify(message []byte, signed []byte) bool
 	HmacFile(filePath string) ([]byte, error)
+	Encrypt(plaintext []byte) ([]byte, error)
+	Decrypt(ciphertext []byte) ([]byte, error)
 }
 
 // 检查安全相关配置的有效性
@@ -87,4 +89,12 @@ func IsGMSSLCertFile(certFile string) bool {
 		return cert.SignatureAlgorithm == x509.SM2WithSM3
 	}
 	return false
+}
+
+func GetHmacKey() ([]byte, bool) {
+	hmacKeyData := envconfig.HMACKey()
+	if hmacKeyData == "" {
+		return nil, false
+	}
+	return []byte(hmacKeyData), true
 }

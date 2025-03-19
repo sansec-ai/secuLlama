@@ -1152,8 +1152,7 @@ func allowedHostsMiddleware(addr net.Addr) gin.HandlerFunc {
 
 func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
 	// Initialize security protection middleware
-	validKeys := security.GetAPIKeys() // Get all API keys
-	authMiddleware := security.APIKeyAuth(validKeys)
+	authMiddleware := security.APIKeyAuth(s.crypto)
 
 	corsConfig := cors.DefaultConfig()
 	corsConfig.AllowWildcard = true
@@ -1226,7 +1225,7 @@ func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
 
 		// Add API key management endpoint
 		secure.POST("/v1/auth/generate-key", func(c *gin.Context) {
-			key, err := security.GenerateAPIKey()
+			key, err := security.GenerateAPIKey(s.crypto)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError,
 					gin.H{"error": "failed to generate API key"})

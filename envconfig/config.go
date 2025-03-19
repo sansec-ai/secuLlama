@@ -81,6 +81,9 @@ func SM2Signatory() string {
 func HMACKey() string {
 	return Var("OLLAMA_HMAC_KEY")
 }
+func SM4Key() string {
+	return Var("OLLAMA_SM4_KEY")
+}
 
 // AllowedOrigins returns a list of allowed origins. AllowedOrigins can be configured via the OLLAMA_ORIGINS environment variable.
 func AllowedOrigins() (origins []string) {
@@ -298,7 +301,8 @@ func AsMap() map[string]EnvVar {
 		"OLLAMA_SSL_CERT_ENC": {"OLLAMA_SSL_CERT_ENC", SSLCert(), "Path to GM SSL Encryption Certificate file"},
 		"OLLAMA_SSL_KEY_ENC":  {"OLLAMA_SSL_KEY_ENC", SSLKey(), "Path to  GM SSL Encryption private key file"},
 		"OLLAMA_SM2_KEY":      {"OLLAMA_SM2_KEY", SM2Key(), "Path to SM2 private key file (PEM format)"},
-		"OLLAMA_HMAC_KEY":     {"OLLAMA_HMAC_KEY", HMACKey(), "Path to hmac key."},
+		"OLLAMA_HMAC_KEY":     {"OLLAMA_HMAC_KEY", HMACKey(), "HMAC key value"},
+		"OLLAMA_SM4_KEY":      {"OLLAMA_SM4_KEY", SM4Key(), "SM4 key value"},
 	}
 
 	if runtime.GOOS != "windows" {

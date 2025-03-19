@@ -53,9 +53,9 @@ OLLAMA_SM2_SIGNATORY="Your Organization Name"
 
 ### 4.大模型文件的一致性校验
 - 模型文件在拉取到本地后进行hmac计算 ，并在模型文件运行加载时进行hmac验证，防止模型文件被篡改。
-- 服务启动时需要配置HMAC key文件路径:
+- 服务启动时需要配置HMAC key值(16字节):
 ```
-OLLAMA_HMAC_KEY=path/to/hmac_key.bin
+OLLAMA_HMAC_KEY=12345678xxxxxxxx
 ```
 ### 5. 硬件安全模块(HSM)的支持
 - 本项目支持使用密码卡等硬件模块，提供安全密钥的保护能力 ，可对api key文件及证书文件进行加密保护。
@@ -64,8 +64,10 @@ OLLAMA_HMAC_KEY=path/to/hmac_key.bin
 ```bash
 # sm2 key在密码机中的索引
 OLLAMA_SM2_KEY=1
-# hmac key原文
-OLLAMA_HMAC_KEY=123456
+# hmac key值
+OLLAMA_HMAC_KEY=12345678xxxxxxxx
+# 用于加密api key文件的SM4密钥
+OLLAMA_SM4_KEY=12345678xxxxxxxx
 ```
 
 ## 安装
@@ -80,9 +82,9 @@ go build --tags=hsm .
 ## 使用说明
 ### ollama命令
 - 基本与Ollama一样，使用方法请参考[Ollama项目](https://github.com/ollama/ollama)。
-- 在服务端启用了SSL/TLS传输后，客户端需要增加如下的配置参数：
+- 客户端增加如下的配置参数：
 ```bash
---insecure # 忽略证书校验
+--insecure # 是否忽略证书校验
 --gmtls # 使用国密证书 (默认使用RSA证书)
 ```
 - 示例如下:
@@ -90,10 +92,10 @@ go build --tags=hsm .
 export OLLAMA_HOST=https://127.0.0.1:11434 
 export OAPIKEY=ss-.....
 # 连接国密服务端
-ollama --insecure --gmtls --apikey=${OAPIKEY} list
+ollama --gmtls --apikey=${OAPIKEY} list
 
 # 连接rsa服务端
-ollama --insecure --tls --apikey=${OAPIKEY} list
+ollama --apikey=${OAPIKEY} list
 ```
 ### REST API
 - 使用方式与原[Ollama](https://github.com/ollama/ollama)项目保持一致。
@@ -110,3 +112,8 @@ curl -kv -X POST https://127.0.0.1:11434/api/chat \
           "stream": true
         }'
 ```
+## ApiKey文件说明
+apikey文件默认存储目录：`~/.ollama/api_keys`，格式：[密文]$[明文]
+说明：
+- 没有$分隔符，表示是明文
+-	可以只保留密文，但需要保留$

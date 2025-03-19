@@ -33,6 +33,10 @@ func NewCrypto() (Crypto, error) {
 		return nil, err
 	}
 	hmacKey, _ := GetHmacKey()
+	if len(hmacKey) != 16 {
+		// 未配置环境变量，返回错误
+		return nil, fmt.Errorf("HMAC密钥未配置，或者不是16字节")
+	}
 	return &SoftCrypto{sm2Key: sm2Key, hmacKey: hmacKey}, nil
 }
 
@@ -87,6 +91,15 @@ func (c *SoftCrypto) HmacFile(filePath string) ([]byte, error) {
 	hmacSum := h.Sum(hashSum)
 	return hmacSum, nil
 }
+func (c *SoftCrypto) Encrypt(plaintext []byte) ([]byte, error) {
+	// 软模块不支持加解密
+	return plaintext, nil
+}
+
+func (c *SoftCrypto) Decrypt(ciphertext []byte) ([]byte, error) {
+	// 软模块不支持加解密
+	return ciphertext, nil
+}
 
 // LoadSM2PrivateKey 加载并解析SM2私钥
 func LoadSM2PrivateKey() (*sm2.PrivateKey, error) {
@@ -114,19 +127,4 @@ func LoadSM2PrivateKey() (*sm2.PrivateKey, error) {
 	}
 
 	return privKey, nil
-}
-
-func GetHmacKey() ([]byte, bool) {
-	hmacKeyFile := envconfig.HMACKey()
-	if hmacKeyFile == "" {
-		return []byte("my_secret_key"), false
-	}
-
-	// 加载hmac key文件
-	hmacKey, err := os.ReadFile(hmacKeyFile)
-	if err != nil {
-		// default hmac key
-		return []byte("1234567812345678"), false
-	}
-	return hmacKey, true
 }

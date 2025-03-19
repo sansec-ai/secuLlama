@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -14,8 +15,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+/*
+apikey文件存储：~/.ollama/api_keys
+格式：[密文]$[明文]
+说明：1.没有$分隔符，表示是明文
+
+	2.可以只保留密文，但需要保留$
+*/
 const (
-	keyLength = 32 // 256-bit key
+	keyLength = 32 // 256-bit key(include 'ss-' prefix)
 	keyFile   = "api_keys"
 )
 
@@ -24,13 +32,29 @@ var (
 	mu       sync.RWMutex
 )
 
-func GetAPIKeys() map[string]bool {
+const KeySeparator = "$"
+
+func init() {
+	crypto, err := NewCrypto()
+	if err != nil {
+		panic("Failed to initialize crypto: " + err.Error())
+	}
+	loadKeys(crypto)
+
+	// Ensure there is at least one valid key
+	if len(keyStore) == 0 {
+		panic("API key initialization failed : no valid API keys found")
+	}
+}
+
+func getAPIKeys() map[string]bool {
 	mu.RLock()
 	defer mu.RUnlock()
 	return keyStore
 }
 
-func APIKeyAuth(validKeys map[string]bool) gin.HandlerFunc {
+func APIKeyAuth(crypto Crypto) gin.HandlerFunc {
+	validKeys := getAPIKeys()
 	return func(c *gin.Context) {
 		// Skip preflight requests and health checks
 		if c.Request.Method == "OPTIONS" || c.Request.URL.Path == "/" {
@@ -86,16 +110,7 @@ func APIKeyAuth(validKeys map[string]bool) gin.HandlerFunc {
 	}
 }
 
-func init() {
-	loadKeys()
-
-	// Ensure there is at least one valid key
-	if len(keyStore) == 0 {
-		panic("API key initialization failed : no valid API keys found")
-	}
-}
-
-func loadKeys() {
+func loadKeys(crypto Crypto) {
 	keyStore = make(map[string]bool)
 
 	// Get key file path
@@ -107,58 +122,112 @@ func loadKeys() {
 		os.MkdirAll(filepath.Dir(keyPath), 0700)
 	}
 
+	var migratedKeys []string
 	// Read existing keys
 	data, _ := os.ReadFile(keyPath)
-	for _, key := range strings.Split(string(data), "\n") {
-		if len(key) > 0 {
-			keyStore[key] = true
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// 分割密文和明文
+		parts := strings.SplitN(line, KeySeparator, 2)
+		var encryptedKey string
+		var plainKey string
+
+		if len(parts) == 1 {
+			// 没有":"分隔符,则key就是明文，需要加密
+			plainKey = parts[0]
+			// 去掉ss-前缀后base64解码
+			if !strings.HasPrefix(line, "ss-") {
+				slog.Error("未加密的API密钥格式错误",
+					"key", line[:4]+"****")
+				continue
+			}
+			keyBin, err := base64.URLEncoding.DecodeString(plainKey[3:])
+			if err != nil {
+				slog.Error("base64解码失败", "error", err)
+				continue
+			}
+			encrypted, err := crypto.Encrypt([]byte(keyBin))
+			if err != nil {
+				slog.Error("api key加密失败", "key", plainKey[:4]+"****", "error", err)
+				continue
+			}
+			encryptedKey = base64.URLEncoding.EncodeToString(encrypted)
+			migratedKeys = append(migratedKeys, fmt.Sprintf("%s%s%s", encryptedKey, KeySeparator, plainKey))
+		} else {
+			// 有分隔符，则第1个是密文
+			encryptedKey = parts[0]
+			if parts[1] != "" {
+				plainKey = parts[1]
+			} else {
+				encryptedBin, err := base64.URLEncoding.DecodeString(encryptedKey)
+				if err != nil {
+					slog.Error("base64解码失败", "error", err)
+					continue
+				}
+				plainKeyBytes, err := crypto.Decrypt(encryptedBin)
+				if err != nil {
+					slog.Error("api key解密失败", "error", err)
+					continue
+				}
+				plainKey = "ss-" + base64.URLEncoding.EncodeToString(plainKeyBytes)
+			}
+		}
+
+		keyStore[plainKey] = true
+	}
+
+	// 写回加密后的密钥
+	if len(migratedKeys) > 0 {
+		f, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_TRUNC, 0600)
+		if err != nil {
+			panic("无法更新密钥文件: " + err.Error())
+		}
+		defer f.Close()
+
+		for _, key := range migratedKeys {
+			if _, err := f.WriteString(key + "\n"); err != nil {
+				panic("写入密钥失败: " + err.Error())
+			}
 		}
 	}
 
 	// Automatic default key creation logic
 	if len(keyStore) == 0 {
-		mu.Lock()
-		defer mu.Unlock()
-
-		// Generate random key
-		b := make([]byte, keyLength)
-		if _, err := rand.Read(b); err != nil {
-			panic("failed to generate default API key: " + err.Error())
-		}
-		defaultKey := "ss-" + base64.URLEncoding.EncodeToString(b)
-
-		// Write to file
-		f, err := os.OpenFile(keyPath, os.O_CREATE|os.O_WRONLY, 0600)
+		defaultKey, err := GenerateAPIKey(crypto)
 		if err != nil {
-			panic("failed to create API key file: " + err.Error())
-		}
-		defer f.Close()
-
-		if _, err := f.WriteString(defaultKey + "\n"); err != nil {
-			panic("failed to write default API key: " + err.Error())
+			panic("failed to generate default API key: " + err.Error())
 		}
 
 		// Output key to log
 		slog.Info("Auto-generated default API Key",
-			"key", defaultKey,
-			"notice", "This key should be rotated in production environments")
-
-		keyStore[defaultKey] = true
+			"key", defaultKey[:4]+"****",
+			"notice", "This key should be rotated in production environments (only first 4 characters logged)")
 	}
 }
 
-func GenerateAPIKey() (string, error) {
-	b := make([]byte, keyLength)
-	if _, err := rand.Read(b); err != nil {
+func GenerateAPIKey(crypto Crypto) (string, error) {
+	// 生成明文密钥
+	keyBytes := make([]byte, keyLength)
+	if _, err := rand.Read(keyBytes); err != nil {
 		return "", err
 	}
 
-	key := "ss-" + base64.URLEncoding.EncodeToString(b)
+	// 加密存储
+	encrypted, err := crypto.Encrypt([]byte(keyBytes))
+	if err != nil {
+		return "", fmt.Errorf("加密失败: %w", err)
+	}
+	encryptedKey := base64.URLEncoding.EncodeToString(encrypted)
+	plainKey := "ss-" + base64.URLEncoding.EncodeToString(keyBytes)
 
+	// 写入文件
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Write to file
 	path := filepath.Join(os.Getenv("HOME"), ".ollama", keyFile)
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
@@ -166,20 +235,10 @@ func GenerateAPIKey() (string, error) {
 	}
 	defer f.Close()
 
-	if _, err := f.WriteString(key + "\n"); err != nil {
+	if _, err := f.WriteString(fmt.Sprintf("%s%s%s\n", encryptedKey, KeySeparator, plainKey)); err != nil {
 		return "", err
 	}
 
-	keyStore[key] = true
-	return key, nil
-}
-
-func ValidateAPIKey(key string) bool {
-	mu.RLock()
-	defer mu.RUnlock()
-	// API key format validation
-	if !strings.HasPrefix(key, "ss-") {
-		return false
-	}
-	return keyStore[key]
+	keyStore[plainKey] = true
+	return plainKey, nil
 }

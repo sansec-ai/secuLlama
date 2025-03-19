@@ -2,8 +2,10 @@
 
 package security
 
+///
 import (
 	"encoding/asn1"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -24,10 +26,27 @@ func NewCrypto() (Crypto, error) {
 	// 获取环境变量中的密钥索引
 	keyIndex, err := strconv.Atoi(envconfig.SM2Key())
 	if err != nil {
-		slog.Warn("SM2_KEY_INDEX not found, use default key index--1")
-		keyIndex = 1
+		return nil, fmt.Errorf("SM2_KEY_INDEX not found")
 	}
+
+	// 添加边界检查
+	const minKeyIndex = 0
+	const maxKeyIndex = 99
+	if keyIndex < minKeyIndex || keyIndex > maxKeyIndex {
+		return nil, fmt.Errorf("无效的OLLAMA_SM2_KEY值 %d，有效范围是 %d-%d", keyIndex, minKeyIndex, maxKeyIndex)
+	}
+
 	hmacKey, _ := GetHmacKey()
+	if len(hmacKey) != 16 {
+		// 未配置环境变量，返回错误
+		return nil, fmt.Errorf("HMAC密钥未配置，或者不是16字节")
+	}
+
+	// 从环境变量获取SM4密钥
+	sm4Key := []byte(envconfig.SM4Key())
+	if len(sm4Key) != 16 {
+		return nil, errors.New("SM4密钥未配置，或者不是16字节")
+	}
 
 	return &HSMCrypto{uint32(keyIndex), hmacKey}, nil
 }
@@ -135,14 +154,100 @@ func (c *HSMCrypto) Sign(message []byte) ([]byte, error) {
 }
 
 func (c *HSMCrypto) Verify(message []byte, signed []byte) bool {
+	// HSM模块不需要后端验签
 	return false
 }
 
-func GetHmacKey() ([]byte, bool) {
-	hmacKeyData := envconfig.HMACKey()
-	if hmacKeyData == "" {
-		// default hmac key
-		return []byte("1234567812345678"), false
+func (c *HSMCrypto) Encrypt(plaintext []byte) ([]byte, error) {
+	slog.Info("HSM Encrypt ", "Key:", os.Getenv("OLLAMA_SM4_KEY"), "plaintext", plaintext)
+	handler, err := SDF_OpenDevice()
+	if err != nil {
+		return nil, err
 	}
-	return []byte(hmacKeyData), true
+	defer SDF_CloseDevice(handler)
+
+	session, err := SDF_OpenSession(handler)
+	if err != nil {
+		return nil, err
+	}
+	defer SDF_CloseSession(session)
+	sm4Key, err := LoadSM4Key(session)
+	if err != nil {
+		return nil, err
+	}
+
+	// 生成IV
+	iv, err := SDF_GenerateRandom(session, 16) // SM4块大小16字节
+	if err != nil {
+		return nil, fmt.Errorf("生成IV失败: %v", err)
+	}
+
+	// 执行加密
+	ciphertext, err := SDF_Encrypt(
+		session,
+		sm4Key,       // 使用SM4密钥句柄
+		SGD_SMS4_CBC, // 算法标识
+		iv,
+		plaintext,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("加密失败: %v", err)
+	}
+
+	return append(iv, ciphertext...), nil
+}
+
+func (c *HSMCrypto) Decrypt(ciphertext []byte) ([]byte, error) {
+	slog.Info("HSM Decrypt ", "Key:", os.Getenv("OLLAMA_SM4_KEY"), "ciphertext", ciphertext)
+	handler, err := SDF_OpenDevice()
+	if err != nil {
+		return nil, err
+	}
+	defer SDF_CloseDevice(handler)
+
+	session, err := SDF_OpenSession(handler)
+	if err != nil {
+		return nil, err
+	}
+	defer SDF_CloseSession(session)
+	sm4Key, err := LoadSM4Key(session)
+	if err != nil {
+		return nil, err
+	}
+
+	// 分离IV和密文
+	if len(ciphertext) < 16 {
+		return nil, errors.New("无效密文格式")
+	}
+	iv := ciphertext[:16]
+	actualCipher := ciphertext[16:]
+
+	// 执行解密
+	plaintext, err := SDF_Decrypt(
+		session,
+		sm4Key,       // 使用SM4密钥句柄
+		SGD_SMS4_CBC, // 算法标识
+		iv,
+		actualCipher,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("解密失败: %v", err)
+	}
+
+	return plaintext, nil
+}
+
+func LoadSM4Key(session CTypeSGDHandle) (CTypeSGDHandle, error) {
+	// 从环境变量获取SM4密钥
+	sm4Key := []byte(os.Getenv("OLLAMA_SM4_KEY"))
+	if len(sm4Key) != 16 {
+		return nil, errors.New("SM4密钥必须为16字节")
+	}
+
+	// 导入SM4密钥
+	keyHandle, err := SDF_ImportKey(session, sm4Key)
+	if err != nil {
+		return nil, fmt.Errorf("导入SM4密钥失败: %v", err)
+	}
+	return keyHandle, nil
 }

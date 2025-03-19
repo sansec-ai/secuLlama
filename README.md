@@ -51,7 +51,7 @@ OLLAMA_SM2_SIGNATORY="Your Organization Name"
 ```
 ### 4. Consistency Check for Large Model Files
 - Performs HMAC calculation on the model file after it is pulled locally and verifies the HMAC when the model file is loaded to prevent tampering.
-- Required HMAC key file path:
+- Required HMAC key data(16 bytes):
 ```
 OLLAMA_HMAC_KEY=path/to/hmac_key.bin
 ```
@@ -62,8 +62,10 @@ OLLAMA_HMAC_KEY=path/to/hmac_key.bin
 ```bash
 # Index of the sm2 key in the cryptographic device
 OLLAMA_SM2_KEY=1
-# The original hmac key
+# The hmac key data(16 bytes)
 OLLAMA_HMAC_KEY=123456
+# The sm4 key data(16 bytes)
+OLLAMA_SM4_KEY=12345678xxxxxxxx
 ```
 
 ## Installation
@@ -84,10 +86,10 @@ OLLAMA_HMAC_KEY=123456
 export OLLAMA_HOST=https://127.0.0.1:11434 
 export OAPIKEY=ss-.....
 # Connect to GM SSL certificate server
-ollama --insecure --gmtls --apikey=${OAPIKEY} list
+ollama --gmtls --apikey=${OAPIKEY} list
 
 # Connect to RSA SSL server
-ollama --insecure --tls --apikey=${OAPIKEY} list
+ollama --apikey=${OAPIKEY} list
 ```
 ### REST API
 - Usage is consistent with the original[Ollama](https://github.com/ollama/ollama)project.
@@ -104,3 +106,8 @@ curl -kv -X POST https://127.0.0.1:11434/api/chat \
           "stream": true
         }'
 ```
+### API Key File Description
+The API key file is stored by default in the directory: ~/.ollama/api_keys, with the format: [ciphertext]$[plaintext].
+Notes:
+- If there is no $ separator, it indicates that the key is in plaintext.
+- Only the ciphertext can be retained, but the $ must be preserved.
