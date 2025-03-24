@@ -14,7 +14,7 @@ import (
 	"strconv"
 
 	"github.com/ollama/ollama/envconfig"
-	"github.com/tjfoc/gmsm/sm3"
+	"github.com/sansec-ai/gmsm/sm3"
 )
 
 type HSMCrypto struct {

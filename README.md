@@ -5,12 +5,12 @@ This project is based on the open source  [Ollama](https://github.com/ollama/oll
 - Supports the national standard **GM/T 0024-2014** dual certificates (signature certificate and encryption certificate)
 - Environment variable configuration is as follows:
 ```bash
-  # Path to the server SSL/TLS certificate file
-  OLLAMA_SSL_CERT=path/to/sig_cert.pem
-  OLLAMA_SSL_KEY=path/to/sig_key.pem
-  # When the system detects that OLLAMA_SSL_CERT is a national certificate, it will automatically enable the environment variables for the encryption certificate
-  OLLAMA_SSL_CERT_ENC=path/to/enc_cert.pem
-  OLLAMA_SSL_KEY_ENC=path/to/enc_key.pem
+  # Path to the server SSL/TLS certificate file, PFX file and password
+  OLLAMA_SSL_PFX=path/to/sig_cert.pfx
+  OLLAMA_SSL_PFX_PASSWD=123456
+  # When the system detects that OLLAMA_SSL_PFX is a national certificate, it will automatically enable the environment variables for the encryption certificate
+  OLLAMA_SSL_PFX_ENC=path/to/enc_cert.pfx
+  OLLAMA_SSL_PFX_ENC_PASSWD=123456
 ```
 ### 2. API Key Security Protection
 - API security protection is enabled by default, and a random key is generated on the first startup and written to the ~/.ollama/api_keys file.

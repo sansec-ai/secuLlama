@@ -54,18 +54,18 @@ func Host() *url.URL {
 }
 
 // security related environment variables
-func SSLCert() string {
-	return Var("OLLAMA_SSL_CERT")
+func SSLPfx() string {
+	return Var("OLLAMA_SSL_PFX")
 }
 
-func SSLKey() string {
-	return Var("OLLAMA_SSL_KEY")
+func SSLPfxPass() string {
+	return Var("OLLAMA_SSL_PFX_PASSWD")
 }
-func SSLCertEnc() string {
-	return Var("OLLAMA_SSL_CERT_ENC")
+func SSLPfxEnc() string {
+	return Var("OLLAMA_SSL_PFX_ENC")
 }
-func SSLKeyEnc() string {
-	return Var("OLLAMA_SSL_KEY_ENC")
+func SSLPfxEncPass() string {
+	return Var("OLLAMA_SSL_PFX_ENC_PASSWD")
 }
 
 // SM2Key returns the path to SM2 private key
@@ -296,13 +296,13 @@ func AsMap() map[string]EnvVar {
 		"NO_PROXY":    {"NO_PROXY", String("NO_PROXY")(), "No proxy"},
 
 		// Security Config
-		"OLLAMA_SSL_CERT":     {"OLLAMA_SSL_CERT", SSLCert(), "Path to SSL certificate file"},
-		"OLLAMA_SSL_KEY":      {"OLLAMA_SSL_KEY", SSLKey(), "Path to SSL private key file"},
-		"OLLAMA_SSL_CERT_ENC": {"OLLAMA_SSL_CERT_ENC", SSLCert(), "Path to GM SSL Encryption Certificate file"},
-		"OLLAMA_SSL_KEY_ENC":  {"OLLAMA_SSL_KEY_ENC", SSLKey(), "Path to  GM SSL Encryption private key file"},
-		"OLLAMA_SM2_KEY":      {"OLLAMA_SM2_KEY", SM2Key(), "Path to SM2 private key file (PEM format)"},
-		"OLLAMA_HMAC_KEY":     {"OLLAMA_HMAC_KEY", HMACKey(), "HMAC key value"},
-		"OLLAMA_SM4_KEY":      {"OLLAMA_SM4_KEY", SM4Key(), "SM4 key value"},
+		"OLLAMA_SSL_PFX":            {"OLLAMA_SSL_PFX", SSLPfx(), "Path to SSL certificate PFX file"},
+		"OLLAMA_SSL_PFX_PASSWD":     {"OLLAMA_SSL_PFX_PASSWD", SSLPfxPass(), "Password for the PFX certificate."},
+		"OLLAMA_SSL_PFX_ENC":        {"OLLAMA_SSL_PFX_ENC", SSLPfxEnc(), "Path to GM SSL Encryption Certificate file"},
+		"OLLAMA_SSL_PFX_ENC_PASSWD": {"OLLAMA_SSL_PFX_ENC_PASSWD", SSLPfxEncPass(), "Password for the encrypted certificate."},
+		"OLLAMA_SM2_KEY":            {"OLLAMA_SM2_KEY", SM2Key(), "Path to SM2 private key file (PEM format)"},
+		"OLLAMA_HMAC_KEY":           {"OLLAMA_HMAC_KEY", HMACKey(), "HMAC key value"},
+		"OLLAMA_SM4_KEY":            {"OLLAMA_SM4_KEY", SM4Key(), "SM4 key value"},
 	}
 
 	if runtime.GOOS != "windows" {

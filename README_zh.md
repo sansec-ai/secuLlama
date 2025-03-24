@@ -5,12 +5,13 @@
 - 支持国密标准 **GM/T 0024-2014** 双证书 (签名证书和加密证书)
 - 服务启动时配置环境变量如下:
 ```bash
-  # 服务端SSL/TLS 证书文件的路径
-  OLLAMA_SSL_CERT=path/to/sig_cert.pem
-  OLLAMA_SSL_KEY=path/to/sig_key.pem
-  # 系统检测OLLAMA_SSL_CERT是国密证书时，会自动启用加密证书的环境变量
-  OLLAMA_SSL_CERT_ENC=path/to/enc_cert.pem
-  OLLAMA_SSL_KEY_ENC=path/to/enc_key.pem
+  # 服务端SSL/TLS 证书文件的路径, PFX 格式
+  OLLAMA_SSL_PFX=path/to/sig_cert.pfx
+  # pfx 密码
+  OLLAMA_SSL_PFX_PASSWD=123456
+  # 系统检测OLLAMA_SSL_PFX是国密证书时，会自动启用加密证书的环境变量
+  OLLAMA_SSL_PFX_ENC=path/to/enc_cert.pfx
+  OLLAMA_SSL_PFX_ENC_PASSWD=123456
 ```
 ### 2. API Key 安全保护
 - 默认启用API安全防护，并在第一次启动时生成一个随机的key，写入`~/.ollama/api_keys`文件。

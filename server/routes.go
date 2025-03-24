@@ -26,8 +26,8 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/tjfoc/gmsm/gmtls"
-	"github.com/tjfoc/gmsm/sm3"
+	"github.com/sansec-ai/gmsm/gmtls"
+	"github.com/sansec-ai/gmsm/sm3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ollama/ollama/api"
@@ -51,8 +51,8 @@ var mode string = gin.DebugMode
 type Server struct {
 	addr      net.Addr
 	sched     *Scheduler
-	certFile  string
-	certKey   string
+	rsaCerts  []tls.Certificate
+	gmCerts   []gmtls.Certificate
 	crypto    security.Crypto
 	signatory string
 }
@@ -1309,42 +1309,11 @@ func Serve(ln net.Listener) error {
 	}
 
 	// Load security configuration
-	s.certFile, s.certKey, s.crypto, err = security.LoadSecurityConfig()
+	s.rsaCerts, s.gmCerts, s.crypto, err = security.LoadSecurityConfig()
 	if err != nil {
 		return err
 	}
 	s.signatory = envconfig.SM2Signatory()
-
-	var config *gmtls.Config
-	isGmSSL := false
-	if s.certFile != "" {
-		signCert, err := gmtls.LoadX509KeyPair(s.certFile, s.certKey)
-		if err != nil {
-			slog.Error("Failed to load certificate and key ", "error", err)
-			return nil
-		}
-		isGmSSL = security.IsGMSSLCertFile(s.certFile)
-		if isGmSSL {
-			// Enable dual certificates for GMSSL
-			encCert, err := gmtls.LoadX509KeyPair(envconfig.SSLCertEnc(), envconfig.SSLKeyEnc())
-			if err != nil {
-				slog.Error("Failed to load enc certificate and key ", "error", err)
-				return err
-			}
-
-			config = &gmtls.Config{
-				GMSupport: &gmtls.GMSupport{
-					WorkMode: "GMSSLOnly", // "AutoSwitch",
-				},
-				Certificates: []gmtls.Certificate{signCert, encCert}, // Initialize certificate list
-				// CipherSuites:  // Use default GMSSL cipher suites
-			}
-		} else if s.certFile != "" {
-			config = &gmtls.Config{
-				Certificates: []gmtls.Certificate{signCert},
-			}
-		}
-	}
 
 	http.Handle("/", h)
 
@@ -1387,10 +1356,18 @@ func Serve(ln net.Listener) error {
 	gpus := discover.GetGPUInfo()
 	gpus.LogDetails()
 
-	// err = srvr.Serve(ln)
-
-	if s.certFile != "" && s.certKey != "" {
-		slog.Info("Starting SSL server.", "isGmSSL", isGmSSL)
+	if s.rsaCerts != nil {
+		srvr.TLSConfig.Certificates = s.rsaCerts
+		slog.Info("Starting SSL server.")
+		err = srvr.ServeTLS(ln, "", "")
+	} else if s.gmCerts != nil {
+		config := &gmtls.Config{
+			Certificates: s.gmCerts,
+			GMSupport: &gmtls.GMSupport{
+				WorkMode: "GMSSLOnly", // "AutoSwitch",
+			},
+		}
+		slog.Info("Starting GMSSL server.")
 		gmListener := gmtls.NewListener(ln, config)
 		err = srvr.Serve(gmListener)
 	} else {

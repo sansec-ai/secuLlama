@@ -30,7 +30,7 @@ import (
 	"github.com/ollama/ollama/format"
 	"github.com/ollama/ollama/version"
 	"github.com/spf13/cobra"
-	"github.com/tjfoc/gmsm/gmtls"
+	"github.com/sansec-ai/gmsm/gmtls"
 )
 
 // Client encapsulates client state for interacting with the ollama

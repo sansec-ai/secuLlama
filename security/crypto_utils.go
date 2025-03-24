@@ -1,16 +1,16 @@
 package security
 
 import (
-	"encoding/pem"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/ollama/ollama/api"
 	"github.com/ollama/ollama/envconfig"
-	"github.com/tjfoc/gmsm/x509"
+	"github.com/sansec-ai/gmsm/gmtls"
+	"golang.org/x/crypto/pkcs12"
 )
 
 type Crypto interface {
@@ -23,19 +23,76 @@ type Crypto interface {
 }
 
 // 检查安全相关配置的有效性
-func LoadSecurityConfig() (string, string, Crypto, error) {
-	certFile := envconfig.SSLCert()
-	keyFile := envconfig.SSLKey()
-	if (certFile == "" && keyFile != "") || (certFile != "" && keyFile == "") {
-		return "", "", nil, fmt.Errorf("SSL requires both cert and key")
-	}
-
-	// 检查sm2key文件是否有效的sm2文件
+func LoadSecurityConfig() ([]tls.Certificate, []gmtls.Certificate, Crypto, error) {
 	crypto, err := NewCrypto()
 	if err != nil {
-		return "", "", nil, err
+		return nil, nil, nil, err
 	}
-	return certFile, keyFile, crypto, nil
+
+	certFile := envconfig.SSLPfx()
+	if certFile == "" {
+		return nil, nil, crypto, nil
+	}
+	passwd := envconfig.SSLPfxPass()
+
+	rsaCerts, err := loadPFXCert_RSA(certFile, passwd)
+	if rsaCerts != nil || err == nil {
+		return rsaCerts, nil, crypto, nil
+	}
+
+	// 加载rsa证书错误，尝试GM证书加载
+	slog.Warn("Failed to load RSA certificate, retry load GM certificate", "error", err)
+
+	signCert, err := loadPFXCert_SM2(certFile, passwd)
+	if err != nil {
+		slog.Error("Failed to load GM certificate ", "error", err)
+		return nil, nil, nil, err
+	}
+	encCert, err := loadPFXCert_SM2(envconfig.SSLPfxEnc(), envconfig.SSLPfxEncPass())
+	if err != nil {
+		slog.Error("Failed to load GM Encryption certificate ", "error", err)
+		return nil, nil, nil, err
+	}
+	return nil, []gmtls.Certificate{*signCert, *encCert}, crypto, nil
+}
+
+func loadPFXCert_RSA(pfxFile string, password string) ([]tls.Certificate, error) {
+	pfx_data, err := os.ReadFile(pfxFile)
+	if err != nil {
+		return nil, err
+	}
+
+	privateKey, cert, err := pkcs12.Decode(pfx_data, password)
+	if err != nil {
+		return nil, err
+	}
+	// 构建tls.Certificate
+	tlsCert := tls.Certificate{
+		Certificate: [][]byte{cert.Raw},
+		PrivateKey:  privateKey,
+		Leaf:        cert,
+	}
+	return []tls.Certificate{tlsCert}, nil
+}
+
+func loadPFXCert_SM2(pfxFile string, password string) (*gmtls.Certificate, error) {
+	pfxData, err := os.ReadFile(pfxFile)
+	if err != nil {
+		return nil, err
+	}
+
+	cert, privateKey, err := ParsePkcs12Cert(password, pfxData)
+	if err != nil {
+		return nil, err
+	}
+
+	// 构建 gmtls.Certificate
+	gmCert := gmtls.Certificate{
+		Certificate: [][]byte{cert.Raw},
+		PrivateKey:  privateKey,
+		Leaf:        cert,
+	}
+	return &gmCert, nil
 }
 
 func SignResponse(crypto Crypto, sm3Sum []byte, signatory string, resp *api.ChatResponse) error {
@@ -67,28 +124,6 @@ func SignResponse(crypto Crypto, sm3Sum []byte, signatory string, resp *api.Chat
 	// slog.Info("signPlain in hex", "hex", fmt.Sprintf("%x", signData))
 	// slog.Info("signValue in hex", "hex", fmt.Sprintf("%x", value), " len=", len(value))
 	return err
-}
-
-// 检查是否国密证书
-func IsGMSSLCertFile(certFile string) bool {
-	if certFile == "" {
-		return false
-	}
-	data, _ := os.ReadFile(certFile)
-	block, _ := pem.Decode(data)
-	if block == nil {
-		return false
-	}
-
-	// 检测证书类型
-	if strings.Contains(block.Type, "SM2") {
-		return true
-	}
-	if strings.Contains(block.Type, "CERTIFICATE") {
-		cert, _ := x509.ParseCertificate(block.Bytes)
-		return cert.SignatureAlgorithm == x509.SM2WithSM3
-	}
-	return false
 }
 
 func GetHmacKey() ([]byte, bool) {

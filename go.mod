@@ -12,7 +12,7 @@ require (
 	github.com/stretchr/testify v1.9.0
 	github.com/x448/float16 v0.8.4
 	golang.org/x/sync v0.11.0
-	github.com/tjfoc/gmsm v1.4.1
+	github.com/sansec-ai/gmsm v1.4.2
 )
 
 require (
@@ -47,6 +47,7 @@ require (
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 	gorgonia.org/vecf32 v0.9.0 // indirect
 	gorgonia.org/vecf64 v0.9.0 // indirect
+	software.sslmate.com/src/go-pkcs12 v0.5.0 // indirect
 )
 
 require (

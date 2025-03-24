@@ -12,11 +12,11 @@ import (
 	"io"
 	"os"
 
-	"github.com/tjfoc/gmsm/sm3"
+	"github.com/sansec-ai/gmsm/sm3"
 
 	"github.com/ollama/ollama/envconfig"
-	"github.com/tjfoc/gmsm/sm2"
-	"github.com/tjfoc/gmsm/x509"
+	"github.com/sansec-ai/gmsm/sm2"
+	"github.com/sansec-ai/gmsm/x509"
 )
 
 type SoftCrypto struct {
