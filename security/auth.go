@@ -34,11 +34,7 @@ var (
 
 const KeySeparator = "$"
 
-func init() {
-	crypto, err := NewCrypto()
-	if err != nil {
-		panic("Failed to initialize crypto: " + err.Error())
-	}
+func initKeyStore(crypto Crypto) {
 	loadKeys(crypto)
 
 	// Ensure there is at least one valid key
@@ -47,14 +43,7 @@ func init() {
 	}
 }
 
-func getAPIKeys() map[string]bool {
-	mu.RLock()
-	defer mu.RUnlock()
-	return keyStore
-}
-
 func APIKeyAuth(crypto Crypto) gin.HandlerFunc {
-	validKeys := getAPIKeys()
 	return func(c *gin.Context) {
 		// Skip preflight requests and health checks
 		if c.Request.Method == "OPTIONS" || c.Request.URL.Path == "/" {
@@ -87,10 +76,14 @@ func APIKeyAuth(crypto Crypto) gin.HandlerFunc {
 
 		// Securely compare API Key
 		isValid := false
-		for key := range validKeys {
-			if subtle.ConstantTimeCompare([]byte(parts[1]), []byte(key)) == 1 {
-				isValid = true
-				break
+		{
+			mu.RLock()
+			defer mu.RUnlock()
+			for key := range keyStore {
+				if subtle.ConstantTimeCompare([]byte(parts[1]), []byte(key)) == 1 {
+					isValid = true
+					break
+				}
 			}
 		}
 

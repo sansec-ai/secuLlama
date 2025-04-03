@@ -28,6 +28,8 @@ func LoadSecurityConfig() ([]tls.Certificate, []gmtls.Certificate, Crypto, error
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	// 初始化apikey
+	initKeyStore(crypto)
 
 	certFile := envconfig.SSLPfx()
 	if certFile == "" {
