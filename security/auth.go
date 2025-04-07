@@ -32,7 +32,12 @@ var (
 	mu       sync.RWMutex
 )
 
-const KeySeparator = "$"
+const (
+	KeySeparator        = "$"
+	UserKeyPrefix       = "ss-"
+	ManagementKeyPrefix = "sm-"
+	MaxUserKeys         = 10
+)
 
 func initKeyStore(crypto Crypto) {
 	loadKeys(crypto)
@@ -40,6 +45,23 @@ func initKeyStore(crypto Crypto) {
 	// Ensure there is at least one valid key
 	if len(keyStore) == 0 {
 		panic("API key initialization failed : no valid API keys found")
+	}
+}
+
+func ManagementAPIKeyAuth(crypto Crypto) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		parts := strings.SplitN(authHeader, " ", 2)
+
+		// Require management key prefix
+		if len(parts) != 2 || !strings.HasPrefix(parts[1], ManagementKeyPrefix) {
+			c.AbortWithStatusJSON(http.StatusUnauthorized,
+				gin.H{"error": "management operation requires management API key"})
+			return
+		}
+
+		// Reuse existing validation logic
+		APIKeyAuth(crypto)(c)
 	}
 }
 
@@ -68,7 +90,7 @@ func APIKeyAuth(crypto Crypto) gin.HandlerFunc {
 		}
 
 		// Add prefix verification after format check
-		if !strings.HasPrefix(parts[1], "ss-") {
+		if !strings.HasPrefix(parts[1], UserKeyPrefix) && !strings.HasPrefix(parts[1], ManagementKeyPrefix) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized,
 				gin.H{"error": "invalid API key format"})
 			return
@@ -78,13 +100,13 @@ func APIKeyAuth(crypto Crypto) gin.HandlerFunc {
 		isValid := false
 		{
 			mu.RLock()
-			defer mu.RUnlock()
 			for key := range keyStore {
 				if subtle.ConstantTimeCompare([]byte(parts[1]), []byte(key)) == 1 {
 					isValid = true
 					break
 				}
 			}
+			mu.RUnlock()
 		}
 
 		if !isValid {
@@ -133,41 +155,61 @@ func loadKeys(crypto Crypto) {
 			// 没有":"分隔符,则key就是明文，需要加密
 			plainKey = parts[0]
 			// 去掉ss-前缀后base64解码
-			if !strings.HasPrefix(line, "ss-") {
-				slog.Error("未加密的API密钥格式错误",
-					"key", line[:4]+"****")
+			if !strings.HasPrefix(plainKey, UserKeyPrefix) && !strings.HasPrefix(plainKey, ManagementKeyPrefix) {
+				slog.Error("invalid plaintext key format", "key", plainKey[:4]+"****")
 				continue
 			}
-			keyBin, err := base64.URLEncoding.DecodeString(plainKey[3:])
+			// Determine key type from plaintext prefix
+			isManagement := strings.HasPrefix(plainKey, ManagementKeyPrefix)
+			keyTypePrefix := ManagementKeyPrefix
+			if !isManagement {
+				keyTypePrefix = UserKeyPrefix
+			}
+
+			keyBin, err := base64.URLEncoding.DecodeString(strings.TrimPrefix(plainKey, keyTypePrefix))
 			if err != nil {
-				slog.Error("base64解码失败", "error", err)
+				slog.Error("base64 decode failed", "error", err)
 				continue
 			}
-			encrypted, err := crypto.Encrypt([]byte(keyBin))
+			// Encrypt and add prefix to encrypted version
+			encrypted, err := crypto.Encrypt(keyBin)
 			if err != nil {
-				slog.Error("api key加密失败", "key", plainKey[:4]+"****", "error", err)
+				slog.Error("api key encryption failed", "error", err)
 				continue
 			}
-			encryptedKey = base64.URLEncoding.EncodeToString(encrypted)
+			encryptedKey = fmt.Sprintf("%s%s", keyTypePrefix, base64.URLEncoding.EncodeToString(encrypted))
 			migratedKeys = append(migratedKeys, fmt.Sprintf("%s%s%s", encryptedKey, KeySeparator, plainKey))
 		} else {
-			// 有分隔符，则第1个是密文
+			// 有分隔符，则第1个是密文，需要通过密文解密后得到明文
 			encryptedKey = parts[0]
-			if parts[1] != "" {
-				plainKey = parts[1]
-			} else {
-				encryptedBin, err := base64.URLEncoding.DecodeString(encryptedKey)
-				if err != nil {
-					slog.Error("base64解码失败", "error", err)
-					continue
-				}
-				plainKeyBytes, err := crypto.Decrypt(encryptedBin)
-				if err != nil {
-					slog.Error("api key解密失败", "error", err)
-					continue
-				}
-				plainKey = "ss-" + base64.URLEncoding.EncodeToString(plainKeyBytes)
+
+			// Validate prefixes
+			if !strings.HasPrefix(encryptedKey, UserKeyPrefix) &&
+				!strings.HasPrefix(encryptedKey, ManagementKeyPrefix) {
+				slog.Error("invalid encrypted key prefix", "key", encryptedKey[:4]+"****")
+				continue
 			}
+
+			// Decrypt the key
+			keyTypePrefix := UserKeyPrefix
+			if strings.HasPrefix(encryptedKey, ManagementKeyPrefix) {
+				keyTypePrefix = ManagementKeyPrefix
+			}
+
+			encryptedBin, err := base64.URLEncoding.DecodeString(strings.TrimPrefix(encryptedKey, keyTypePrefix))
+			if err != nil {
+				slog.Error("base64 decode failed", "error", err)
+				continue
+			}
+
+			plainKeyBytes, err := crypto.Decrypt(encryptedBin)
+			if err != nil {
+				slog.Error("api key解密失败", "error", err)
+				continue
+			}
+			plainKey = fmt.Sprintf("%s%s", keyTypePrefix, base64.URLEncoding.EncodeToString(plainKeyBytes))
+
+			migratedKeys = append(migratedKeys, line)
 		}
 
 		keyStore[plainKey] = true
@@ -189,35 +231,52 @@ func loadKeys(crypto Crypto) {
 	}
 
 	// Automatic default key creation logic
-	if len(keyStore) == 0 {
-		defaultKey, err := GenerateAPIKey(crypto)
-		if err != nil {
-			panic("failed to generate default API key: " + err.Error())
+	var hasManagementKey bool
+	for k := range keyStore {
+		if strings.HasPrefix(k, ManagementKeyPrefix) {
+			hasManagementKey = true
+			break
 		}
+	}
 
-		// Output key to log
-		slog.Info("Auto-generated default API Key",
-			"key", defaultKey[:4]+"****",
-			"notice", "This key should be rotated in production environments (only first 4 characters logged)")
+	if !hasManagementKey {
+		mgmtKey, err := GenerateAPIKey(crypto, true)
+		if err != nil {
+			panic("failed to generate management API key: " + err.Error())
+		}
+		slog.Info("Auto-generated management API Key",
+			"key", mgmtKey[:4]+"****",
+			"notice", "This management key should be securely stored")
 	}
 }
 
-func GenerateAPIKey(crypto Crypto) (string, error) {
-	// 生成明文密钥
+func GenerateAPIKey(crypto Crypto, isManagement bool) (string, error) {
+	if !isManagement {
+		// 限制最多10个api key
+		if len(keyStore) >= MaxUserKeys {
+			return "", fmt.Errorf("maximum number of user keys reached (%d)", MaxUserKeys)
+		}
+	}
+	// Generate plain key
 	keyBytes := make([]byte, keyLength)
 	if _, err := rand.Read(keyBytes); err != nil {
 		return "", err
 	}
 
-	// 加密存储
+	// Encrypt storage
 	encrypted, err := crypto.Encrypt([]byte(keyBytes))
 	if err != nil {
-		return "", fmt.Errorf("加密失败: %w", err)
+		return "", fmt.Errorf("encryption failed: %w", err)
 	}
 	encryptedKey := base64.URLEncoding.EncodeToString(encrypted)
-	plainKey := "ss-" + base64.URLEncoding.EncodeToString(keyBytes)
 
-	// 写入文件
+	prefix := UserKeyPrefix
+	if isManagement {
+		prefix = ManagementKeyPrefix
+	}
+	plainKey := prefix + base64.URLEncoding.EncodeToString(keyBytes)
+
+	// Write to file
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -228,7 +287,7 @@ func GenerateAPIKey(crypto Crypto) (string, error) {
 	}
 	defer f.Close()
 
-	if _, err := f.WriteString(fmt.Sprintf("%s%s%s\n", encryptedKey, KeySeparator, plainKey)); err != nil {
+	if _, err := f.WriteString(fmt.Sprintf("%s%s%s%s\n", prefix, encryptedKey, KeySeparator, plainKey)); err != nil {
 		return "", err
 	}
 

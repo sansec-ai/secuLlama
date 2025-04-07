@@ -26,6 +26,7 @@ require (
 	github.com/pdevine/tensor v0.0.0-20240510204454-f88f4562727c
 	golang.org/x/image v0.22.0
 	gonum.org/v1/gonum v0.15.0
+	golang.org/x/time v0.11.0
 )
 
 require (

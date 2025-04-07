@@ -1152,7 +1152,10 @@ func allowedHostsMiddleware(addr net.Addr) gin.HandlerFunc {
 
 func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
 	// Initialize security protection middleware
-	authMiddleware := security.APIKeyAuth(s.crypto)
+	authUser := security.APIKeyAuth(s.crypto)
+	authManager := security.ManagementAPIKeyAuth(s.crypto)
+	// 初始化 QoS 控制器
+	qosController := security.NewQoSController()
 
 	corsConfig := cors.DefaultConfig()
 	corsConfig.AllowWildcard = true
@@ -1184,6 +1187,7 @@ func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
 	r.Use(
 		cors.New(corsConfig),
 		allowedHostsMiddleware(s.addr),
+		qosController.TrafficControl(), // 添加 QoS 中间件
 	)
 
 	// General
@@ -1193,22 +1197,37 @@ func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
 	r.GET("/api/version", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"version": version.Version}) })
 
 	// API routes that require security protection
-	secure := r.Group("/")
-	secure.Use(authMiddleware)
+	secureManager := r.Group("/")
+	secureManager.Use(authManager)
 	{
 		// Local model cache management (new implementation is at end of function)
-		secure.POST("/api/pull", s.PullHandler)
-		secure.POST("/api/push", s.PushHandler)
-		secure.HEAD("/api/tags", s.ListHandler)
-		secure.GET("/api/tags", s.ListHandler)
-		secure.POST("/api/show", s.ShowHandler)
+		secureManager.POST("/api/pull", s.PullHandler)
+		secureManager.POST("/api/push", s.PushHandler)
+		secureManager.HEAD("/api/tags", s.ListHandler)
+		secureManager.GET("/api/tags", s.ListHandler)
+		secureManager.POST("/api/show", s.ShowHandler)
 
 		// Create
-		secure.POST("/api/create", s.CreateHandler)
-		secure.POST("/api/blobs/:digest", s.CreateBlobHandler)
-		secure.HEAD("/api/blobs/:digest", s.HeadBlobHandler)
-		secure.POST("/api/copy", s.CopyHandler)
+		secureManager.POST("/api/create", s.CreateHandler)
+		secureManager.POST("/api/blobs/:digest", s.CreateBlobHandler)
+		secureManager.HEAD("/api/blobs/:digest", s.HeadBlobHandler)
+		secureManager.POST("/api/copy", s.CopyHandler)
 
+		// Add API key management endpoint
+		secureManager.POST("/api/auth/generate-key", func(c *gin.Context) {
+			key, err := security.GenerateAPIKey(s.crypto, false)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError,
+					gin.H{"error": "failed to generate API key"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"api_key": key})
+		})
+	}
+
+	secure := r.Group("/")
+	secure.Use(authUser)
+	{
 		// Inference
 		secure.GET("/api/ps", s.PsHandler)
 		secure.POST("/api/generate", s.GenerateHandler)
@@ -1222,17 +1241,6 @@ func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
 		secure.POST("/v1/embeddings", openai.EmbeddingsMiddleware(), s.EmbedHandler)
 		secure.GET("/v1/models", openai.ListMiddleware(), s.ListHandler)
 		secure.GET("/v1/models/:model", openai.RetrieveMiddleware(), s.ShowHandler)
-
-		// Add API key management endpoint
-		secure.POST("/v1/auth/generate-key", func(c *gin.Context) {
-			key, err := security.GenerateAPIKey(s.crypto)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError,
-					gin.H{"error": "failed to generate API key"})
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{"api_key": key})
-		})
 	}
 	// wrap old with new
 	rs := &registry.Local{
