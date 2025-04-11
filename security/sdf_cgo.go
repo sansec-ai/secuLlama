@@ -5,7 +5,7 @@ package security
 //
 /*
 #cgo CFLAGS: -I./
-#cgo linux LDFLAGS: -L. -lswsds -Wl,-rpath,${SRCDIR}
+#cgo linux LDFLAGS: -L. -lhsm_0018 -Wl,-rpath,${SRCDIR}
 
 #if defined(__linux__) || defined(linux)
     #include <pthread.h>
