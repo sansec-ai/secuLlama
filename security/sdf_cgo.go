@@ -207,7 +207,7 @@ func SDF_ExternalVerify_ECC(session CTypeSGDHandle, alg CTypeAlgorithm, eccRefPu
 	return true, nil
 }
 
-// 单段式hash
+// 三段式hash
 func SDF_Hash(session CTypeSGDHandle, alg CTypeAlgorithm, eccRefPublicKey C.ECCrefPublicKey, pucID []byte, data []byte) (hashData []byte, err error) {
 
 	pucDatas := C.CBytes(data)
@@ -217,7 +217,19 @@ func SDF_Hash(session CTypeSGDHandle, alg CTypeAlgorithm, eccRefPublicKey C.ECCr
 	hashResult := make([]byte, 64)
 	var hashLen C.SGD_UINT32
 
-	rv := C.SDF_Hash(C.SGD_HANDLE(session), C.SGD_UINT32(alg), &eccRefPublicKey, (*C.SGD_UCHAR)(pucIDs), C.SGD_UINT32(len(pucID)), (*C.SGD_UCHAR)(pucDatas), C.SGD_UINT32(len(data)), (*C.SGD_UCHAR)(unsafe.Pointer(&hashResult[0])), &hashLen)
+	rv := C.SDF_HashInit(C.SGD_HANDLE(session), C.SGD_UINT32(alg), &eccRefPublicKey, (*C.SGD_UCHAR)(pucIDs), C.SGD_UINT32(len(pucID)))
+	if rv != 0 {
+		err = ConvertInt64toError(int64(rv))
+		return nil, err
+	}
+
+	rv = C.SDF_HashUpdate(C.SGD_HANDLE(session), (*C.SGD_UCHAR)(pucDatas), C.SGD_UINT32(len(data)))
+	if rv != 0 {
+		err = ConvertInt64toError(int64(rv))
+		return nil, err
+	}
+
+	rv = C.SDF_HashFinal(C.SGD_HANDLE(session), (*C.SGD_UCHAR)(unsafe.Pointer(&hashResult[0])), &hashLen)
 	if rv != 0 {
 		err = ConvertInt64toError(int64(rv))
 		return nil, err

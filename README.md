@@ -13,6 +13,8 @@
 # 环境要求 golang == 1.24.0
 git clone https://github.com/sansec-ai/secuLlama.git
 cd secuLlama
+cmake -B build
+cmake --build build
 go build -o secuLlama .
 # 编译成功，会在项目目录下生成可执行文件 `secuLlama` 。
 

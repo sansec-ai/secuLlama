@@ -1,113 +1,134 @@
 # secuLlama
 ## Feature Description( [中文](README.md) )
-This project is based on the open source  [Ollama](https://github.com/ollama/ollama) , with added security configuration parameters to protect the large model runtime system. The main features are as follows:
-### 1. SSL/TLS Transmission Security Protection
-- Supports the national standard **GM/T 0024-2014** dual certificates (signature certificate and encryption certificate)
-- Environment variable configuration is as follows:
-```bash
-  # Path to the server SSL/TLS certificate file, PFX file and password
-  OLLAMA_SSL_PFX=path/to/sig_cert.pfx
-  OLLAMA_SSL_PFX_PASSWD=123456
-  # When the system detects that OLLAMA_SSL_PFX is a national certificate, it will automatically enable the environment variables for the encryption certificate
-  OLLAMA_SSL_PFX_ENC=path/to/enc_cert.pfx
-  OLLAMA_SSL_PFX_ENC_PASSWD=123456
-```
-### 2. API Key Security Protection
-- API security protection is enabled by default, and a random key is generated on the first startup and written to the ~/.ollama/api_keys file.
+This project is based on the open source [Ollama](https://github.com/ollama/ollama), with added security configuration parameters to protect the large model runtime system. The main features are as follows:
+- **SSL/TLS Transmission Security Protection**: Supports the national standard **GM/T 0024-2014** dual certificates (signature certificate and encryption certificate). 
+- **API Key Security Protection**: Enforces API key security by default, generating a random key on first startup and storing it in the `~/.ollama/api_keys` file. The file format is `[ciphertext]$[plaintext]`.
+- **Signature for Large Model Responses**: SM3 hashing and SM2 signing are applied to the output content of the conversation API to prevent tampering.
+- **Model File Integrity Check**: HMAC verification is performed during model file loading to ensure integrity.
+- **Resource Flow Control**: Dynamic API request concurrency limits via QoS policies to ensure service quality.
+- **Hardware Security Module (HSM) Support**: Integrates cryptographic cards for secure key management, supporting the GM 0018 interface.
 
-### 3. Signature for Large Model System Response Messages
-- Performs SM3 calculation and signature on the output content of the large model conversation API to prevent tampering with the model file.
-- Required environment variables:
+### Detailed Features
+#### 1. SSL/TLS Transmission Security Protection
+- Configuration requires the following environment variables:
 ```bash
-# SM2 key file (PKCS8 format)
-OLLAMA_SM2_KEY=path/to/sm2_private.pem
+# Path to the signature certificate PFX file and password
+OLLAMA_SSL_PFX=path/to/sig_cert.pfx
+OLLAMA_SSL_PFX_PASSWD=123456
+# Encryption certificate PFX (automatically enabled for national certificates)
+OLLAMA_SSL_PFX_ENC=path/to/enc_cert.pfx
+OLLAMA_SSL_PFX_ENC_PASSWD=123456
+```
+
+#### 2. API Key Security Protection
+- By default, API keys are encrypted. The `~/.ollama/api_keys` file format:
+  - `[ciphertext]$[plaintext]` (ciphertext only if `$` is kept without plaintext)
+  - HSM mode generates true ciphertext.
+
+#### 3. Response Message Signing
+- SM2 key requirements:
+```bash
+OLLAMA_SM2_KEY=path/to/sm2_private.pem  # PKCS8 format
 OLLAMA_SM2_SIGNATORY="Your Organization Name"
 ```
-- After configuring the SM2 signature, the client will automatically calculate the signature in the returned conversation message when calling the API.
-- Example response message for /api/chat:
-```json
-{
-    "model": "deepseek-r1:1.5b",
-    "created_at": "2025-03-11T10:45:56.928360888Z",
-    "message": {
-        "role": "assistant",
-        "content": "<think>\n\n</think>\n\n您好！我是由中国的深度求索（DeepSeek）公司开发的智能助手DeepSeek-R1。有关模型和产品的详细内容请参考官方文档。"
-    },
-    "done_reason": "stop",
-    "done": true,
-    "signature": {
-        "sm3": "cf05e6d620804396898976ecb81ca67b40caf7fa8de29a0c5fc0905f94f78a59",
-        "value": "30440220370aaba3d848cbbc503a1f37ae7b19ed1fea617f50e79d362a159cda39e6064f0220313bab6a02a623d7930417cbb03120dc932e7a0ca0c7b5460678ea05657a98e4",
-        "timestamp": "2025-03-11 10:45:56.934260136 +0000 UTC",
-        "signatory": "三未信安人工智能系统"
-    },
-    "total_duration": 24225576425,
-    "load_duration": 22651813713,
-    "prompt_eval_count": 5,
-    "prompt_eval_duration": 123000000,
-    "eval_count": 38,
-    "eval_duration": 1432000000
-}
-```
-### 4. Consistency Check for Large Model Files
-- Performs HMAC calculation on the model file after it is pulled locally and verifies the HMAC when the model file is loaded to prevent tampering.
-- Required HMAC key data(16 bytes):
-```
-OLLAMA_HMAC_KEY=path/to/hmac_key.bin
-```
-### 5. Hardware Security Module Support
-- This project supports the use of hardware modules such as cryptographic cards to provide secure key protection capabilities, encrypting API keys, HMAC keys, SM2 keys, and certificate files.
-- Supports the standard GM 0018 cryptographic operation interface.
-- After enabling the HSM function, configure the following environment variables:
+- API responses include a `signature` block with SM3 digest and SM2 signature.
+
+#### 4. Model File Integrity Check
+- HMAC key (16 bytes) must be configured:
 ```bash
-# Index of the sm2 key in the cryptographic device
-OLLAMA_SM2_KEY=1
-# The hmac key data(16 bytes)
-OLLAMA_HMAC_KEY=123456
-# The sm4 key data(16 bytes)
+OLLAMA_HMAC_KEY=12345678xxxxxxxx
+```
+
+#### 5. HSM Support
+- **Compilation**:
+  - Copy HSM library (e.g., `libswsds.so` → `security/libhsm_0018.so`):
+  ```bash
+  cp your_path/libswsds.so security/libhsm_0018.so
+  ```
+  - Build with `--tags=hsm`:
+  ```bash
+  go build --tags=hsm -o secuLlama .
+  ```
+- **Configuration**:
+```bash
+# SM2 key index in HSM
+OLLAMA_SM2_KEY=2
+# HMAC and SM4 keys for encryption
+OLLAMA_HMAC_KEY=12345678xxxxxxxx
 OLLAMA_SM4_KEY=12345678xxxxxxxx
 ```
 
-## Installation
-
-- The compilation using software cryptographic algorithms is consistent with Ollama. Refer to Manual install instructions.
-- To compile with Hardware Security Module (HSM), you need to copy the library files of the connected HSM to the `security` directory and enable the hsm tag for compilation as follows:
+## Installation & Compilation
+```bash
+# Environment requirement: golang 1.24.0
+git clone https://github.com/sansec-ai/secuLlama.git
+cd secuLlama
+# Standard build
+cmake -B build
+cmake --build build
+go build -o secuLlama .
+# HSM-enabled build
+go build --tags=hsm -o secuLlama .
+```
 
 ## Usage Instructions
-### ollama Command
-- Basically the same as Ollama, refer to the[Ollama项目](https://github.com/ollama/ollama)for usage.
-- After enabling SSL/TLS transmission on the server, the client needs to add the following configuration parameters:
-```bash
---insecure # Ignore certificate verification
---gmtls # Use GM SSL certificate(Default to using RSA certificate)
-```
-- Example:
-```bash
-export OLLAMA_HOST=https://127.0.0.1:11434 
-export OAPIKEY=ss-.....
-# Connect to GM SSL certificate server
-ollama --gmtls --apikey=${OAPIKEY} list
+### Starting the Service
+1. **Optional SSL Certificate Preparation** (using OpenSSL or commercial certs):
+   ```bash
+   export OLLAMA_SSL_PFX=/data/certs/server.pfx
+   export OLLAMA_SSL_PFX_PASSWD=123456
+   ```
+2. **Optional SM2 Key Configuration**:
+   ```bash
+   export OLLAMA_SM2_KEY=/data/keys/sm2-pkcs8.key
+   export OLLAMA_SM2_SIGNATORY="SanSec AI System"
+   ```
+3. **HMAC Key Setup**:
+   ```bash
+   export OLLAMA_HMAC_KEY=12345678xxxxxxxx
+   ```
+4. **Launch Command**:
+   ```bash
+   ./secuLlama serve
+   ```
 
-# Connect to RSA SSL server
-ollama --apikey=${OAPIKEY} list
-```
-### REST API
-- Usage is consistent with the original[Ollama](https://github.com/ollama/ollama)project.
-- API calls require added API key security authentication, example:
+### API Key Management
+- The default API key file `~/.ollama/api_keys` uses `[ciphertext]$[plaintext]` format.  
+- In HSM mode, ciphertext is generated using SM4 encryption with `OLLAMA_SM4_KEY`.
+
+### Model Download Example
 ```bash
-curl -kv -X POST https://127.0.0.1:11434/api/chat \
-     -H "Authorization: Bearer ss-......" \
-     -H "Content-Type: application/json" \
-     -d '{
-          "model": "deepseek-r1:1.5b",
-          "messages": [
-            { "role": "user", "content": "介绍自己" }
-          ],
-          "stream": true
-        }'
+export OLLAMA_HOST=https://127.0.0.1:11434
+export OAPIKEY=sm-xxxxxx
+./secuLlama --apikey=${OAPIKEY} pull deepseek-r1:1.5b
 ```
-### API Key File Description
-The API key file is stored by default in the directory: ~/.ollama/api_keys, with the format: [ciphertext]$[plaintext].
-Notes:
-- If there is no $ separator, it indicates that the key is in plaintext.
-- Only the ciphertext can be retained, but the $ must be preserved.
+
+### REST API Usage
+```bash
+curl -X POST https://127.0.0.1:11434/api/chat \
+  -H "Authorization: Bearer sm-xxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "deepseek-r1:1.5b",
+    "messages": [{"role": "user", "content": "介绍自己"}],
+    "stream": true
+  }'
+```
+
+### Command-Line Parameters
+```bash
+--insecure   # Disable certificate verification
+--gmtls      # Use national GM certificates (default RSA)
+```
+
+### HSM Configuration Notes
+- Ensure HSM libraries are placed in the `security` directory.
+- SM4 key is required for encrypting API keys and model files in HSM mode.
+
+## API Key File Format
+Stored in `~/.ollama/api_keys` with format:
+- `[ciphertext]$[plaintext]`  
+- Preserve `$` even if plaintext is removed.
+
+## Contribution Guidelines
+Contributions are welcome! Please follow the contribution guide for participation.
